@@ -7,7 +7,7 @@ RUN npm run build && npm prune --production
 
 FROM node:24-alpine AS ui-builder
 WORKDIR /ui
-COPY ui/package.json ui/package-lock.json ui/vite.config.ts ui/tsconfig.json ui/tsconfig.node.json ./
+COPY ui/package.json ui/package-lock.json ui/vite.config.ts ui/tsconfig.json ui/tsconfig.node.json ui/index.html ./
 COPY ui/public ./public
 COPY ui/src ./src
 RUN npm ci
@@ -24,13 +24,13 @@ LABEL org.opencontainers.image.title="GH Runner" \
     org.opencontainers.image.vendor="TrilB.Dev" \
     com.docker.desktop.extension.api.version="0.4.2" \
     com.docker.extension.screenshots="" \
-    com.docker.desktop.extension.icon="" \
+    com.docker.desktop.extension.icon="docker.svg" \
     com.docker.extension.detailed-description="" \
     com.docker.extension.publisher-url="" \
     com.docker.extension.additional-urls="" \
     com.docker.extension.categories="" \
     com.docker.extension.changelog=""
-COPY docker-compose.yaml .
-COPY metadata.json .
-COPY docker.svg .
+COPY docker-compose.yaml /docker-compose.yaml
+COPY metadata.json /metadata.json
+COPY docker.svg /docker.svg
 CMD ["node", "/backend/server.js", "--socket", "/run/guest-services/backend.sock"]

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createDockerDesktopClient } from '@docker/extension-api-client';
 import {
+  Alert,
   Autocomplete,
   Badge,
   Box,
@@ -8,15 +9,19 @@ import {
   Card,
   CardContent,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Grid,
+  InputAdornment,
   Stack,
   TextField,
   Typography
 } from '@mui/material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 
 const client = createDockerDesktopClient();
 
@@ -42,14 +47,15 @@ interface Runner extends RunnerConfig {
 
 interface RunnerForm {
   runnerName: string;
-  githubUrl: string;
   owner: string;
   repo: string;
   registrationToken: string;
   labels: string[];
-  hostContainerName: string;
-  runnerRootPath: string;
 }
+
+const GITHUB_BASE_URL = 'https://github.com';
+const DEFAULT_HOST_CONTAINER_NAME = 'gh-runner-host';
+const DEFAULT_RUNNER_ROOT_PATH = '/opt/github';
 
 const labelOptions = [
   'self-hosted',
@@ -62,13 +68,10 @@ const labelOptions = [
 
 const defaultFormState: RunnerForm = {
   runnerName: '',
-  githubUrl: 'https://github.com',
   owner: '',
   repo: '',
   registrationToken: '',
-  labels: [],
-  hostContainerName: '',
-  runnerRootPath: '/opt/github'
+  labels: []
 };
 
 export function App() {
@@ -79,8 +82,107 @@ export function App() {
   const [editing, setEditing] = useState<Runner | null>(null);
   const [formState, setFormState] = useState<RunnerForm>(defaultFormState);
   const [error, setError] = useState<string | null>(null);
+  const [ownerValid, setOwnerValid] = useState<boolean | null>(null);
+  const [repoValid, setRepoValid] = useState<boolean | null>(null);
+  const [ownerValidationMessage, setOwnerValidationMessage] = useState<string>('');
+  const [repoValidationMessage, setRepoValidationMessage] = useState<string>('');
+  const [ownerChecking, setOwnerChecking] = useState(false);
+  const [repoChecking, setRepoChecking] = useState(false);
 
   const service = ddClient.extension.vm?.service;
+
+  const verifyOwner = async (owner: string) => {
+    const trimmedOwner = owner.trim();
+    if (!trimmedOwner) {
+      setOwnerValid(null);
+      setOwnerValidationMessage('GitHub username or organization is required.');
+      return false;
+    }
+
+    setOwnerChecking(true);
+    try {
+      const response = await fetch(`https://api.github.com/users/${encodeURIComponent(trimmedOwner)}`);
+      if (response.ok) {
+        setOwnerValid(true);
+        setOwnerValidationMessage('Owner/org exists on GitHub.');
+        return true;
+      }
+
+      setOwnerValid(false);
+      setOwnerValidationMessage('GitHub username or organization not found.');
+      return false;
+    } catch {
+      setOwnerValid(false);
+      setOwnerValidationMessage('Unable to verify owner/org on GitHub.');
+      return false;
+    } finally {
+      setOwnerChecking(false);
+    }
+  };
+
+  const verifyRepo = async (owner: string, repo: string) => {
+    const trimmedRepo = repo.trim();
+    if (!trimmedRepo) {
+      setRepoValid(null);
+      setRepoValidationMessage('');
+      return true;
+    }
+
+    const trimmedOwner = owner.trim();
+    if (!trimmedOwner) {
+      setRepoValid(false);
+      setRepoValidationMessage('Owner/org must be provided before verifying the repository.');
+      return false;
+    }
+
+    setRepoChecking(true);
+    try {
+      const response = await fetch(`https://api.github.com/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}`);
+      if (response.ok) {
+        setRepoValid(true);
+        setRepoValidationMessage('Repository exists on GitHub.');
+        return true;
+      }
+
+      setRepoValid(false);
+      setRepoValidationMessage('GitHub repository not found for this owner.');
+      return false;
+    } catch {
+      setRepoValid(false);
+      setRepoValidationMessage('Unable to verify repository on GitHub.');
+      return false;
+    } finally {
+      setRepoChecking(false);
+    }
+  };
+
+  const renderValidationAdornment = (valid: boolean | null, checking: boolean) => {
+    if (checking) {
+      return (
+        <InputAdornment position="end">
+          <CircularProgress size={18} />
+        </InputAdornment>
+      );
+    }
+
+    if (valid === true) {
+      return (
+        <InputAdornment position="end">
+          <CheckCircleIcon color="success" />
+        </InputAdornment>
+      );
+    }
+
+    if (valid === false) {
+      return (
+        <InputAdornment position="end">
+          <ErrorOutlineIcon color="error" />
+        </InputAdornment>
+      );
+    }
+
+    return null;
+  };
 
   const loadRunners = useCallback(async () => {
     if (!service) {
@@ -110,13 +212,10 @@ export function App() {
       setEditing(runner);
       setFormState({
         runnerName: runner.runnerName,
-        githubUrl: runner.githubUrl,
         owner: runner.owner,
         repo: runner.repo,
         registrationToken: '',
-        labels: runner.labels,
-        hostContainerName: runner.hostContainerName,
-        runnerRootPath: runner.runnerRootPath
+        labels: runner.labels
       });
     } else {
       setEditing(null);
@@ -137,19 +236,26 @@ export function App() {
       return;
     }
 
+    const ownerOk = await verifyOwner(formState.owner);
+    const repoOk = await verifyRepo(formState.owner, formState.repo);
+    if (!ownerOk || !repoOk) {
+      setError('Please fix the GitHub owner/org and repository validation errors before saving.');
+      return;
+    }
+
     setError(null);
 
     try {
       const payload = {
         runnerName: formState.runnerName,
-        githubUrl: formState.githubUrl,
+        githubUrl: GITHUB_BASE_URL,
         owner: formState.owner,
         repo: formState.repo,
         isOrg: !formState.repo.trim(),
         registrationToken: formState.registrationToken,
         labels: formState.labels,
-        hostContainerName: formState.hostContainerName,
-        runnerRootPath: formState.runnerRootPath
+        hostContainerName: DEFAULT_HOST_CONTAINER_NAME,
+        runnerRootPath: DEFAULT_RUNNER_ROOT_PATH
       };
 
       if (editing) {
@@ -295,38 +401,89 @@ export function App() {
       <Dialog open={showDialog} onClose={closeDialog} fullWidth maxWidth="md">
         <DialogTitle>{editing ? 'Edit runner' : 'Add runner'}</DialogTitle>
         <DialogContent>
+          <Box sx={{ mb: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.paper' }}>
+            <Typography variant="subtitle2" gutterBottom>
+              Hidden configuration
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              GitHub Base URL, Host container name, and Runner root path are managed by the extension and are not editable here.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Default values used:
+            </Typography>
+            <Typography variant="body2" component="div" color="text.secondary">
+              • GitHub Base URL: {GITHUB_BASE_URL}
+            </Typography>
+            <Typography variant="body2" component="div" color="text.secondary">
+              • Host container name: {DEFAULT_HOST_CONTAINER_NAME}
+            </Typography>
+            <Typography variant="body2" component="div" color="text.secondary">
+              • Runner root path: {DEFAULT_RUNNER_ROOT_PATH}
+            </Typography>
+          </Box>
           <Stack spacing={2} sx={{ pt: 1 }}>
             <TextField
               label="Runner name"
               value={formState.runnerName}
               onChange={(event) => setFormState({ ...formState, runnerName: event.target.value })}
-              fullWidth
-            />
-            <TextField
-              label="GitHub base URL"
-              value={formState.githubUrl}
-              onChange={(event) => setFormState({ ...formState, githubUrl: event.target.value })}
+              helperText="A local identifier for this runner. It becomes the runner directory name inside the host container."
               fullWidth
             />
             <TextField
               label="User or org name"
               value={formState.owner}
-              onChange={(event) => setFormState({ ...formState, owner: event.target.value })}
+              onChange={(event) => {
+                const owner = event.target.value;
+                setFormState({ ...formState, owner });
+                setOwnerValid(null);
+                setRepoValid(null);
+                setOwnerValidationMessage('');
+                setRepoValidationMessage('');
+              }}
+              onBlur={() => verifyOwner(formState.owner)}
+              helperText=" "
+              FormHelperTextProps={{ sx: { visibility: 'hidden' } }}
+              error={ownerValid === false}
               fullWidth
+              InputProps={{
+                endAdornment: renderValidationAdornment(ownerValid, ownerChecking)
+              }}
             />
+            {ownerValid === false && ownerValidationMessage ? (
+              <Alert severity="error" sx={{ mt: 1 }}>
+                {ownerValidationMessage}
+              </Alert>
+            ) : null}
             <TextField
               label="Repository name"
               value={formState.repo}
-              onChange={(event) => setFormState({ ...formState, repo: event.target.value })}
-              helperText="Leave blank for organization-level runners"
+              onChange={(event) => {
+                const repo = event.target.value;
+                setFormState({ ...formState, repo });
+                setRepoValid(null);
+                setRepoValidationMessage('');
+              }}
+              onBlur={() => verifyRepo(formState.owner, formState.repo)}
+              helperText=" "
+              FormHelperTextProps={{ sx: { visibility: 'hidden' } }}
+              error={repoValid === false}
               fullWidth
+              InputProps={{
+                endAdornment: renderValidationAdornment(repoValid, repoChecking)
+              }}
             />
+            {repoValid === false && repoValidationMessage ? (
+              <Alert severity="error" sx={{ mt: 1 }}>
+                {repoValidationMessage}
+              </Alert>
+            ) : null}
             {!editing && (
               <TextField
                 label="GitHub registration token"
                 type="password"
                 value={formState.registrationToken}
                 onChange={(event) => setFormState({ ...formState, registrationToken: event.target.value })}
+                helperText="A runner registration token from GitHub Actions settings. Create one in your repo or org settings."
                 fullWidth
               />
             )}
@@ -339,19 +496,14 @@ export function App() {
               renderTags={(value, getTagProps) =>
                 value.map((option, index) => <Chip label={option} {...getTagProps({ index })} key={option} />)
               }
-              renderInput={(params) => <TextField {...params} label="Runner labels" placeholder="Add runner labels" />}
-            />
-            <TextField
-              label="Host container name"
-              value={formState.hostContainerName}
-              onChange={(event) => setFormState({ ...formState, hostContainerName: event.target.value })}
-              fullWidth
-            />
-            <TextField
-              label="Runner root path"
-              value={formState.runnerRootPath}
-              onChange={(event) => setFormState({ ...formState, runnerRootPath: event.target.value })}
-              fullWidth
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Runner labels"
+                  placeholder="Add runner labels"
+                  helperText="Optional labels used by GitHub workflows to target this runner."
+                />
+              )}
             />
           </Stack>
         </DialogContent>

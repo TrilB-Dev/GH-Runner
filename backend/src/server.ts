@@ -7,12 +7,17 @@ import { loadRunners, saveRunner, deleteRunner } from './runnerStorage';
 import type { RunnerConfig } from './runnerStorage';
 import {
   createRunnerInHostContainer,
+  ensureRunnerHostContainer,
+  getRunnerHostHealth,
   getHostRunnerStatus,
   startHostRunner,
   stopHostRunner,
   restartHostRunner,
   removeHostRunner
 } from './docker';
+
+const DEFAULT_HOST_CONTAINER_NAME = 'gh-runner-host';
+const DEFAULT_RUNNER_ROOT_PATH = '/opt/github';
 
 const app = express();
 
@@ -39,10 +44,19 @@ app.get('/api/runners', async (_req: Request, res: Response) => {
   }
 });
 
+app.get('/api/host-health', async (_req: Request, res: Response) => {
+  try {
+    const health = await getRunnerHostHealth(DEFAULT_HOST_CONTAINER_NAME);
+    res.json(health);
+  } catch (error) {
+    res.status(500).json({ error: String(error) });
+  }
+});
+
 app.post('/api/runners', async (req: Request, res: Response) => {
   try {
     const payload = req.body as Partial<RunnerConfig> & { registrationToken?: string };
-    if (!payload.runnerName || !payload.githubUrl || !payload.owner || typeof payload.isOrg !== 'boolean' || !payload.labels || !payload.hostContainerName || !payload.runnerRootPath) {
+    if (!payload.runnerName || !payload.githubUrl || !payload.owner || typeof payload.isOrg !== 'boolean' || !payload.labels) {
       return res.status(400).json({ error: 'Missing required runner fields.' });
     }
 
@@ -52,7 +66,7 @@ app.post('/api/runners', async (req: Request, res: Response) => {
 
     const id = randomUUID();
     const safeName = payload.runnerName.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
-    const runnerPath = `${payload.runnerRootPath.replace(/\/$/, '')}/${safeName}`;
+    const runnerPath = `${DEFAULT_RUNNER_ROOT_PATH.replace(/\/$/, '')}/${safeName}`;
 
     const runner: RunnerConfig = {
       id,
@@ -65,8 +79,8 @@ app.post('/api/runners', async (req: Request, res: Response) => {
       labels: Array.isArray(payload.labels)
         ? payload.labels
         : String(payload.labels).split(',').map((label) => label.trim()).filter(Boolean),
-      hostContainerName: payload.hostContainerName,
-      runnerRootPath: payload.runnerRootPath,
+      hostContainerName: DEFAULT_HOST_CONTAINER_NAME,
+      runnerRootPath: DEFAULT_RUNNER_ROOT_PATH,
       runnerPath,
       createdAt: new Date().toISOString()
     };
@@ -113,8 +127,8 @@ app.put('/api/runners/:id', async (req: Request, res: Response) => {
         : payload.labels
         ? String(payload.labels).split(',').map((label) => label.trim()).filter(Boolean)
         : existing.labels,
-      hostContainerName: payload.hostContainerName ?? existing.hostContainerName,
-      runnerRootPath: payload.runnerRootPath ?? existing.runnerRootPath,
+      hostContainerName: DEFAULT_HOST_CONTAINER_NAME,
+      runnerRootPath: DEFAULT_RUNNER_ROOT_PATH,
       runnerPath: existing.runnerPath,
       createdAt: existing.createdAt
     };
@@ -194,6 +208,14 @@ if (existsSync(socketPath)) {
   rmSync(socketPath);
 }
 
-app.listen(socketPath, () => {
-  console.log(`GitHub Runner Manager listening on socket ${socketPath}`);
+async function startServer() {
+  await ensureRunnerHostContainer(DEFAULT_HOST_CONTAINER_NAME);
+  app.listen(socketPath, () => {
+    console.log(`GitHub Runner Manager listening on socket ${socketPath}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
 });
