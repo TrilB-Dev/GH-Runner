@@ -1,0 +1,4 @@
+﻿
+> gh-runner-backend@0.0.1 build
+> tsc -p tsconfig.json
+

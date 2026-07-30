@@ -9,6 +9,7 @@ export interface RunnerConfig {
   repo: string;
   isOrg: boolean;
   tokenName?: string;
+  runnerGroup?: string;
   labels: string[];
   hostContainerName: string;
   runnerRootPath: string;
@@ -16,7 +17,7 @@ export interface RunnerConfig {
   createdAt: string;
 }
 
-const storagePath = join(__dirname, '..', 'data', 'runners.json');
+const storagePath = join(__dirname, 'data', 'runners.json');
 
 export async function loadRunners(): Promise<RunnerConfig[]> {
   try {
@@ -32,7 +33,7 @@ export async function loadRunners(): Promise<RunnerConfig[]> {
 }
 
 export async function saveRunners(runners: RunnerConfig[]) {
-  await fs.mkdir(join(__dirname, '..', 'data'), { recursive: true });
+  await fs.mkdir(join(__dirname, 'data'), { recursive: true });
   await fs.writeFile(storagePath, JSON.stringify(runners, null, 2), 'utf8');
 }
 

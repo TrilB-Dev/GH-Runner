@@ -1,27 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createDockerDesktopClient } from '@docker/extension-api-client';
-import {
-  Alert,
-  Autocomplete,
-  Badge,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Chip,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Grid,
-  InputAdornment,
-  Stack,
-  TextField,
-  Typography
-} from '@mui/material';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 
 const client = createDockerDesktopClient();
 
@@ -45,12 +23,30 @@ interface Runner extends RunnerConfig {
   dockerRawStatus?: string;
 }
 
+interface RepoOption {
+  id: number;
+  name: string;
+  full_name: string;
+  private: boolean;
+  owner: string;
+}
+
 interface RunnerForm {
   runnerName: string;
+  selectedTokenId: string;
   owner: string;
   repo: string;
+  runnerGroup?: string;
   registrationToken: string;
   labels: string[];
+}
+
+interface GithubTokenResponse {
+  id: string;
+  name: string;
+  login: string;
+  type: string;
+  createdAt: string;
 }
 
 const GITHUB_BASE_URL = 'https://github.com';
@@ -66,10 +62,27 @@ const labelOptions = [
   'arm64'
 ];
 
+type RunnerSavePayload = {
+  runnerName: string;
+  githubUrl: string;
+  owner: string;
+  repo: string;
+  isOrg: boolean;
+  registrationToken: string;
+  labels: string[];
+  tokenName: string;
+  selectedTokenId: string;
+  runnerGroup?: string;
+  hostContainerName: string;
+  runnerRootPath: string;
+};
+
 const defaultFormState: RunnerForm = {
   runnerName: '',
+  selectedTokenId: '',
   owner: '',
   repo: '',
+  runnerGroup: undefined,
   registrationToken: '',
   labels: []
 };
@@ -82,144 +95,289 @@ export function App() {
   const [editing, setEditing] = useState<Runner | null>(null);
   const [formState, setFormState] = useState<RunnerForm>(defaultFormState);
   const [error, setError] = useState<string | null>(null);
-  const [ownerValid, setOwnerValid] = useState<boolean | null>(null);
-  const [repoValid, setRepoValid] = useState<boolean | null>(null);
-  const [ownerValidationMessage, setOwnerValidationMessage] = useState<string>('');
-  const [repoValidationMessage, setRepoValidationMessage] = useState<string>('');
-  const [ownerChecking, setOwnerChecking] = useState(false);
-  const [repoChecking, setRepoChecking] = useState(false);
+  const [backendMessage, setBackendMessage] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tokenFormName, setTokenFormName] = useState('');
+  const [tokenFormValue, setTokenFormValue] = useState('');
+  const [tokenFormError, setTokenFormError] = useState<string | null>(null);
+  const [tokenActionMessage, setTokenActionMessage] = useState<string | null>(null);
+  const [githubTokens, setGithubTokens] = useState<GithubTokenResponse[]>([]);
+  const [repoOptions, setRepoOptions] = useState<RepoOption[]>([]);
+  const [selectedRepoOption, setSelectedRepoOption] = useState<RepoOption | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [repoLoading, setRepoLoading] = useState(false);
+  const [runnerGroups, setRunnerGroups] = useState<Array<{id:number;name:string}>>([]);
+  const [runnerGroupLoading, setRunnerGroupLoading] = useState(false);
 
   const service = ddClient.extension.vm?.service;
 
-  const verifyOwner = async (owner: string) => {
-    const trimmedOwner = owner.trim();
-    if (!trimmedOwner) {
-      setOwnerValid(null);
-      setOwnerValidationMessage('GitHub username or organization is required.');
-      return false;
-    }
-
-    setOwnerChecking(true);
-    try {
-      const response = await fetch(`https://api.github.com/users/${encodeURIComponent(trimmedOwner)}`);
-      if (response.ok) {
-        setOwnerValid(true);
-        setOwnerValidationMessage('Owner/org exists on GitHub.');
-        return true;
+  const formatError = useCallback((err: unknown) => {
+    const timeoutMessage = 'The backend did not respond in time. The extension backend may still be starting. Please wait a moment and try again.';
+    if (err instanceof Error) {
+      if (err.name === 'HeadersTimeoutError' || err.message.includes('Headers Timeout')) {
+        return timeoutMessage;
       }
-
-      setOwnerValid(false);
-      setOwnerValidationMessage('GitHub username or organization not found.');
-      return false;
-    } catch {
-      setOwnerValid(false);
-      setOwnerValidationMessage('Unable to verify owner/org on GitHub.');
-      return false;
-    } finally {
-      setOwnerChecking(false);
+      return err.message;
     }
-  };
-
-  const verifyRepo = async (owner: string, repo: string) => {
-    const trimmedRepo = repo.trim();
-    if (!trimmedRepo) {
-      setRepoValid(null);
-      setRepoValidationMessage('');
-      return true;
-    }
-
-    const trimmedOwner = owner.trim();
-    if (!trimmedOwner) {
-      setRepoValid(false);
-      setRepoValidationMessage('Owner/org must be provided before verifying the repository.');
-      return false;
-    }
-
-    setRepoChecking(true);
-    try {
-      const response = await fetch(`https://api.github.com/repos/${encodeURIComponent(trimmedOwner)}/${encodeURIComponent(trimmedRepo)}`);
-      if (response.ok) {
-        setRepoValid(true);
-        setRepoValidationMessage('Repository exists on GitHub.');
-        return true;
+    if (typeof err === 'string') {
+      if (err.includes('Headers Timeout')) {
+        return timeoutMessage;
       }
+      return err;
+    }
+    if (typeof err === 'object' && err !== null) {
+      const anyErr = err as Record<string, unknown>;
+      const name = String(anyErr.name || '');
+      const message = String(anyErr.message || '');
+      if (name === 'HeadersTimeoutError' || message.includes('Headers Timeout')) {
+        return timeoutMessage;
+      }
+      try {
+        return JSON.stringify(err, Object.getOwnPropertyNames(err));
+      } catch {
+        return 'An unknown error occurred.';
+      }
+    }
+    return 'An unknown error occurred.';
+  }, []);
 
-      setRepoValid(false);
-      setRepoValidationMessage('GitHub repository not found for this owner.');
-      return false;
-    } catch {
-      setRepoValid(false);
-      setRepoValidationMessage('Unable to verify repository on GitHub.');
-      return false;
+  const delay = useCallback((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)), []);
+
+  const isBackendStartupError = useCallback((err: unknown) => {
+    if (err instanceof Error) {
+      return err.name === 'HeadersTimeoutError' || err.message.includes('Headers Timeout');
+    }
+    if (typeof err === 'string') {
+      return err.includes('Headers Timeout');
+    }
+    if (typeof err === 'object' && err !== null) {
+      const anyErr = err as Record<string, unknown>;
+      const name = String(anyErr.name || '');
+      const message = String(anyErr.message || '');
+      return name === 'HeadersTimeoutError' || message.includes('Headers Timeout');
+    }
+    return false;
+  }, []);
+
+  const serviceGet = useCallback(async <T,>(path: string, timeoutMs = 30000): Promise<T> => {
+    if (!service) {
+      throw new Error('Unable to access the Docker VM service.');
+    }
+
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      const err = new Error('Headers Timeout Error');
+      err.name = 'HeadersTimeoutError';
+      setTimeout(() => reject(err), timeoutMs);
+    });
+
+    return await Promise.race([service.get(path) as Promise<T>, timeoutPromise]);
+  }, [service]);
+
+  const selectedToken = useMemo(
+    () => githubTokens.find((token) => token.id === formState.selectedTokenId) ?? null,
+    [githubTokens, formState.selectedTokenId]
+  );
+
+  const loadGithubTokensList = useCallback(async () => {
+    if (!service) {
+      return;
+    }
+
+    try {
+      const tokens = await serviceGet<GithubTokenResponse[]>('/api/github-tokens', 30000);
+      setGithubTokens(tokens || []);
+    } catch (err) {
+      setError(formatError(err));
+    }
+  }, [service, serviceGet, formatError]);
+
+  const loadReposForToken = useCallback(async (tokenId: string) => {
+    if (!service) {
+      return;
+    }
+
+    setRepoLoading(true);
+    try {
+      const repos = await serviceGet<RepoOption[]>(`/api/github-tokens/${encodeURIComponent(tokenId)}/repos`, 30000);
+      setRepoOptions(repos || []);
+    } catch (err) {
+      setError(formatError(err));
+      setRepoOptions([]);
     } finally {
-      setRepoChecking(false);
+      setRepoLoading(false);
     }
-  };
+  }, [service, serviceGet, formatError]);
 
-  const renderValidationAdornment = (valid: boolean | null, checking: boolean) => {
-    if (checking) {
-      return (
-        <InputAdornment position="end">
-          <CircularProgress size={18} />
-        </InputAdornment>
+  const loadRunnerGroups = useCallback(async (tokenId: string, owner: string, repo: string, isOrg: boolean) => {
+    if (!service) {
+      return;
+    }
+
+    if (!owner) {
+      setRunnerGroups([]);
+      return;
+    }
+
+    setRunnerGroupLoading(true);
+    try {
+      const query = new URLSearchParams({
+        owner,
+        isOrg: String(isOrg)
+      });
+      if (!isOrg) {
+        query.set('repo', repo);
+      }
+      const groups = await serviceGet<Array<{ id:number; name:string }>>(
+        `/api/github-tokens/${encodeURIComponent(tokenId)}/runner-groups?${query.toString()}`,
+        30000
       );
+      setRunnerGroups(groups || []);
+    } catch (err) {
+      setError(formatError(err));
+      setRunnerGroups([]);
+    } finally {
+      setRunnerGroupLoading(false);
     }
+  }, [service, serviceGet, formatError]);
 
-    if (valid === true) {
-      return (
-        <InputAdornment position="end">
-          <CheckCircleIcon color="success" />
-        </InputAdornment>
-      );
-    }
-
-    if (valid === false) {
-      return (
-        <InputAdornment position="end">
-          <ErrorOutlineIcon color="error" />
-        </InputAdornment>
-      );
-    }
-
-    return null;
-  };
-
-  const loadRunners = useCallback(async () => {
+  const createGithubToken = async () => {
     if (!service) {
       setError('Unable to access the Docker VM service.');
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    setTokenFormError(null);
+    setTokenActionMessage(null);
+
+    if (!tokenFormName.trim() || !tokenFormValue.trim()) {
+      setTokenFormError('Token name and token are required.');
+      return;
+    }
 
     try {
-      const response = await service.get('/api/runners');
-      setRunners((response as Runner[]) || []);
+      await service.post('/api/github-tokens', {
+        name: tokenFormName.trim(),
+        token: tokenFormValue.trim()
+      });
+      setTokenActionMessage('GitHub token saved successfully.');
+      setTokenFormName('');
+      setTokenFormValue('');
+      await loadGithubTokensList();
     } catch (err) {
-      setError(String(err));
-    } finally {
-      setLoading(false);
+      setTokenFormError(formatError(err));
     }
-  }, [service]);
+  };
+
+  const deleteGithubTokenById = async (id: string) => {
+    if (!service) {
+      setError('Unable to access the Docker VM service.');
+      return;
+    }
+
+    try {
+      await service.delete(`/api/github-tokens/${encodeURIComponent(id)}`);
+      if (formState.selectedTokenId === id) {
+        setFormState({ ...formState, selectedTokenId: '', owner: '', repo: '' });
+        setSelectedRepoOption(null);
+      }
+      await loadGithubTokensList();
+    } catch (err) {
+      setError(formatError(err));
+    }
+  };
+
+  const loadRunners = useCallback(async () => {
+    if (!service) {
+      setLoading(false);
+      setError('Unable to access the Docker VM service. Make sure Docker Desktop is running and the VM service is available.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setBackendMessage(null);
+
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      try {
+        const response = await serviceGet<Runner[]>('/api/runners', 30000);
+        setRunners(response || []);
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (isBackendStartupError(err) && attempt < 4) {
+          setBackendMessage(`Extension backend is still starting, retrying (${attempt}/4)...`);
+          await delay(2000);
+          continue;
+        }
+        setError(formatError(err));
+        break;
+      }
+    }
+
+    if (!lastError) {
+      setBackendMessage(null);
+    }
+    setLoading(false);
+  }, [serviceGet, delay, isBackendStartupError, formatError]);
 
   useEffect(() => {
-    loadRunners();
-  }, [loadRunners]);
+    void loadRunners();
+    void loadGithubTokensList();
+  }, [loadRunners, loadGithubTokensList]);
+
+  useEffect(() => {
+    if (settingsOpen) {
+      void loadGithubTokensList();
+      const interval = setInterval(() => {
+        void loadGithubTokensList();
+      }, 30000);
+      return () => clearInterval(interval);
+    }
+    return undefined;
+  }, [settingsOpen, loadGithubTokensList]);
+
+  useEffect(() => {
+    if (!editing) {
+      if (selectedToken) {
+        setFormState((prev) => ({
+          ...prev,
+          owner: selectedToken.login,
+          repo: ''
+        }));
+        setSelectedRepoOption(null);
+        void loadReposForToken(selectedToken.id);
+        void loadRunnerGroups(selectedToken.id, selectedToken.login, '', true);
+      } else {
+        setRepoOptions([]);
+        setSelectedRepoOption(null);
+      }
+    }
+  }, [selectedToken, loadReposForToken, loadRunnerGroups, editing]);
+
+  useEffect(() => {
+    if (!editing && selectedToken) {
+      void loadRunnerGroups(selectedToken.id, formState.owner, formState.repo, !formState.repo.trim());
+    }
+  }, [editing, selectedToken, formState.owner, formState.repo, loadRunnerGroups]);
 
   const openDialog = (runner?: Runner) => {
     if (runner) {
       setEditing(runner);
       setFormState({
         runnerName: runner.runnerName,
+        selectedTokenId: '',
         owner: runner.owner,
         repo: runner.repo,
         registrationToken: '',
         labels: runner.labels
       });
+      setSelectedRepoOption(null);
     } else {
       setEditing(null);
       setFormState(defaultFormState);
+      setSelectedRepoOption(null);
     }
     setShowDialog(true);
   };
@@ -231,22 +389,36 @@ export function App() {
   };
 
   const saveRunner = async () => {
+    if (saving) {
+      return;
+    }
+
     if (!service) {
       setError('Unable to access the Docker VM service.');
       return;
     }
 
-    const ownerOk = await verifyOwner(formState.owner);
-    const repoOk = await verifyRepo(formState.owner, formState.repo);
-    if (!ownerOk || !repoOk) {
-      setError('Please fix the GitHub owner/org and repository validation errors before saving.');
+    if (!editing && !selectedToken) {
+      setError('Select a GitHub API token before creating a new runner.');
+      return;
+    }
+
+    if (!formState.runnerName.trim()) {
+      setError('Runner name is required.');
+      return;
+    }
+
+    if (!formState.owner.trim()) {
+      setError('Owner/organization is required.');
       return;
     }
 
     setError(null);
+    setBackendMessage('Saving runner...');
+    setSaving(true);
 
     try {
-      const payload = {
+      const payload: RunnerSavePayload = {
         runnerName: formState.runnerName,
         githubUrl: GITHUB_BASE_URL,
         owner: formState.owner,
@@ -254,6 +426,9 @@ export function App() {
         isOrg: !formState.repo.trim(),
         registrationToken: formState.registrationToken,
         labels: formState.labels,
+        tokenName: selectedToken?.name || '',
+        selectedTokenId: selectedToken?.id || '',
+        runnerGroup: formState.runnerGroup,
         hostContainerName: DEFAULT_HOST_CONTAINER_NAME,
         runnerRootPath: DEFAULT_RUNNER_ROOT_PATH
       };
@@ -265,9 +440,13 @@ export function App() {
       }
 
       closeDialog();
-      loadRunners();
+      await loadRunners();
+      setBackendMessage('Runner saved successfully.');
     } catch (err) {
-      setError(String(err));
+      setError(formatError(err));
+      setBackendMessage(null);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -281,9 +460,32 @@ export function App() {
 
     try {
       await service.post(`/api/runners/${id}/${action}`, {});
-      loadRunners();
+      await loadRunners();
     } catch (err) {
-      setError(String(err));
+      setError(formatError(err));
+    }
+  };
+
+  const refreshHostContainer = async () => {
+    if (!service) {
+      setError('Unable to access the Docker VM service.');
+      return;
+    }
+
+    if (!window.confirm('This will recreate the host container and preserve existing runner data. Continue?')) {
+      return;
+    }
+
+    setError(null);
+    setBackendMessage('Refreshing host container...');
+
+    try {
+      await service.post('/api/host-refresh', {});
+      await loadRunners();
+      setBackendMessage('Host container refresh completed successfully.');
+    } catch (err) {
+      setError(formatError(err));
+      setBackendMessage(null);
     }
   };
 
@@ -303,217 +505,386 @@ export function App() {
       await service.delete(`/api/runners/${id}`);
       loadRunners();
     } catch (err) {
-      setError(String(err));
+      setError(formatError(err));
     }
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Stack spacing={3}>
-        <Box>
-          <Typography variant="h4" component="h1" gutterBottom>
-            GitHub Runner Manager
-          </Typography>
-          <Typography color="text.secondary">
-            Manage GitHub self-hosted runners inside Docker Desktop.
-          </Typography>
-        </Box>
+    <div className="container py-4">
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <div className="d-flex align-items-center gap-3">
+          <img src="./GH-Runner-Logo.svg" alt="GitHub Runner Manager" style={{ height: 128 }} />
+          <div>
+            <h1 className="h4 mb-1">GitHub Runner Manager</h1>
+            <p className="text-muted mb-0">Manage GitHub self-hosted runners inside Docker Desktop.</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="btn btn-outline-secondary"
+          onClick={() => {
+            void loadGithubTokensList();
+            setSettingsOpen(true);
+          }}
+          aria-label="Settings"
+        >
+          ⚙️
+        </button>
+      </div>
 
-        {error ? (
-          <Box sx={{ p: 2, border: '1px solid', borderColor: 'error.main', borderRadius: 1, bgcolor: 'error.light', color: 'error.contrastText' }}>
-            <Typography>{error}</Typography>
-          </Box>
-        ) : null}
+      {error ? <div className="alert alert-danger">{error}</div> : null}
+      {backendMessage && !error ? <div className="alert alert-info">{backendMessage}</div> : null}
 
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6">Runners</Typography>
-          <Button variant="contained" onClick={() => openDialog()}>
+      <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-2">
+        <h2 className="h5 mb-0">Runners</h2>
+        <div className="btn-group">
+          <button type="button" className="btn btn-outline-primary" onClick={refreshHostContainer}>
+            🔄 Refresh host
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => openDialog()}>
             + Add runner
-          </Button>
-        </Stack>
+          </button>
+        </div>
+      </div>
 
-        {loading ? (
-          <Typography>Loading runners …</Typography>
-        ) : runners.length === 0 ? (
-          <Card>
-            <CardContent>
-              <Typography>No runners have been added yet.</Typography>
-              <Button sx={{ mt: 2 }} variant="contained" onClick={() => openDialog()}>
-                Add runner
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <Stack spacing={2}>
-            {runners.map((runner) => (
-              <Card key={runner.id} sx={{ p: 2 }}>
-                <Grid container spacing={2} alignItems="center">
-                  <Grid item xs={12} md={9}>
-                    <Typography variant="h6">{runner.runnerName}</Typography>
-                    <Typography color="text.secondary" variant="body2">
-                      {runner.hostContainerName} · {runner.runnerPath}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} md={3}>
-                    <Badge
-                      badgeContent={runner.status.toUpperCase()}
-                      color={runner.status === 'on' ? 'success' : runner.status === 'paused' ? 'warning' : 'default'}
+      {settingsOpen && (
+        <>
+          <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} aria-modal="true" role="dialog">
+            <div className="modal-dialog modal-dialog-centered modal-lg">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h5 className="modal-title">Settings</h5>
+                  <button type="button" className="btn-close" aria-label="Close" onClick={() => setSettingsOpen(false)} />
+                </div>
+                <div className="modal-body py-4">
+                  <div className="mb-4">
+                    <h6>Saved GitHub API tokens</h6>
+                    {githubTokens.length === 0 ? (
+                      <div className="alert alert-info mb-0">No saved GitHub API tokens yet. Add one below to access repository lists in the runner form.</div>
+                    ) : (
+                      githubTokens.map((token) => (
+                        <div className="card mb-3" key={token.id}>
+                          <div className="card-body p-3">
+                            <div className="d-flex justify-content-between align-items-center gap-3">
+                              <div>
+                                <h6 className="mb-1">{token.name}</h6>
+                                <p className="mb-0 text-muted">{token.login} · {token.type} · saved {new Date(token.createdAt).toLocaleDateString()}</p>
+                              </div>
+                              <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deleteGithubTokenById(token.id)}>
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div>
+                    <h6>Add a new GitHub API token</h6>
+                    <div className="mb-3">
+                      <label className="form-label">Token name</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={tokenFormName}
+                        onChange={(event) => {
+                          setTokenFormName(event.target.value);
+                          setTokenFormError(null);
+                          setTokenActionMessage(null);
+                        }}
+                        placeholder="Friendly name for this token"
+                      />
+                      <div className="form-text">A friendly name to identify this token in the runner creation form.</div>
+                    </div>
+                    <div className="mb-3">
+                      <label className="form-label">Personal access token</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        value={tokenFormValue}
+                        onChange={(event) => {
+                          setTokenFormValue(event.target.value);
+                          setTokenFormError(null);
+                          setTokenActionMessage(null);
+                        }}
+                        placeholder="GitHub PAT"
+                      />
+                      <div className="form-text">GitHub personal access token used to enumerate repositories and validate access.</div>
+                    </div>
+                    {tokenFormError ? <div className="alert alert-danger">{tokenFormError}</div> : null}
+                    {tokenActionMessage ? <div className="alert alert-success">{tokenActionMessage}</div> : null}
+                    <button type="button" className="btn btn-primary" onClick={createGithubToken}>
+                      Save token
+                    </button>
+                    <div className="mt-3 text-muted small">
+                      <p className="mb-1">Recommended permissions:</p>
+                      <p className="mb-0">• repo (full repository access for private repos)</p>
+                      <p className="mb-0">• read:org (if using organization-owned runners)</p>
+                      <p className="mb-0">• workflow (optional, for workflow-related access if needed)</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show" />
+        </>
+      )}
+
+      {loading ? (
+        <div>Loading runners …</div>
+      ) : runners.length === 0 ? (
+        <div className="card">
+          <div className="card-body">
+            <h5 className="card-title">You don't have any runners configured yet.</h5>
+            <p className="card-text text-muted">Get started by creating your first GitHub self-hosted runner.</p>
+            <button type="button" className="btn btn-primary" onClick={() => openDialog()}>
+              Create new runner
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="accordion" id="runnerAccordion">
+          {runners.map((runner, index) => (
+            <div className="accordion-item" key={runner.id}>
+              <h2 className="accordion-header" id={`heading-${runner.id}`}>
+                <button
+                  className="accordion-button collapsed"
+                  type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target={`#collapse-${runner.id}`}
+                  aria-expanded="false"
+                  aria-controls={`collapse-${runner.id}`}
+                >
+                  <div className="d-flex w-100 justify-content-between align-items-center">
+                    <div>
+                      <strong>{runner.runnerName}</strong>
+                      <div className="text-muted small">{runner.hostContainerName} · {runner.runnerPath}</div>
+                    </div>
+                    <div className="d-flex align-items-center gap-2">
+                      <span className={`badge rounded-pill text-capitalize bg-${runner.status === 'on' ? 'success' : runner.status === 'paused' ? 'warning' : 'secondary'}`}>
+                        {runner.status}
+                      </span>
+                      <span>▾</span>
+                    </div>
+                  </div>
+                </button>
+              </h2>
+              <div
+                id={`collapse-${runner.id}`}
+                className="accordion-collapse collapse"
+                aria-labelledby={`heading-${runner.id}`}
+                data-bs-parent="#runnerAccordion"
+              >
+                <div className="accordion-body">
+                  <div className="row gy-3">
+                    <div className="col-12 col-md-6">
+                      <p className="mb-1"><strong>GitHub URL:</strong> {runner.githubUrl}</p>
+                      <p className="mb-1"><strong>Owner:</strong> {runner.owner}</p>
+                      <p className="mb-0"><strong>Repo:</strong> {runner.repo || '(org)'}</p>
+                    </div>
+                    <div className="col-12 col-md-6">
+                      <p className="mb-1"><strong>Labels:</strong> {runner.labels.join(', ')}</p>
+                      <p className="mb-1"><strong>Created:</strong> {new Date(runner.createdAt).toLocaleString()}</p>
+                      <p className="mb-0"><strong>Raw status:</strong> {runner.dockerRawStatus || 'unknown'}</p>
+                    </div>
+                  </div>
+                  <div className="d-flex flex-wrap gap-2 mt-3">
+                    <button type="button" className="btn btn-outline-primary" disabled={runner.status === 'on'} onClick={() => runAction(runner.id, 'start')}>
+                      ▶️ Start
+                    </button>
+                    <button type="button" className="btn btn-outline-danger" disabled={runner.status !== 'on'} onClick={() => runAction(runner.id, 'stop')}>
+                      ⏹️ Stop
+                    </button>
+                    <button type="button" className="btn btn-outline-secondary" disabled={runner.status !== 'on'} onClick={() => runAction(runner.id, 'restart')}>
+                      🔄 Restart
+                    </button>
+                    <button type="button" className="btn btn-outline-success" onClick={() => openDialog(runner)}>
+                      ✏️ Edit
+                    </button>
+                    <button type="button" className="btn btn-outline-dark" onClick={() => deleteRunner(runner.id)}>
+                      🗑️ Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showDialog && (
+        <>
+          <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} aria-modal="true" role="dialog">
+            <div className="modal-dialog modal-dialog-centered modal-lg">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h5 className="modal-title">{editing ? 'Edit runner' : 'Add runner'}</h5>
+                  <button type="button" className="btn-close" aria-label="Close" onClick={closeDialog} />
+                </div>
+                <div className="modal-body py-4">
+                  <div className="mb-3">
+                    <label className="form-label">Runner name</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formState.runnerName}
+                      onChange={(event) => setFormState({ ...formState, runnerName: event.target.value })}
+                      placeholder="Runner name"
                     />
-                  </Grid>
-                </Grid>
+                    <div className="form-text">A local identifier for this runner. It becomes the runner directory name inside the host container.</div>
+                  </div>
 
-                <Grid container spacing={2} sx={{ mt: 2 }}>
-                  <Grid item xs={12} md={6}>
-                    <Typography><strong>GitHub URL:</strong> {runner.githubUrl}</Typography>
-                    <Typography><strong>Owner:</strong> {runner.owner}</Typography>
-                    <Typography><strong>Repo:</strong> {runner.repo || '(org)'}</Typography>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <Typography><strong>Labels:</strong> {runner.labels.join(', ')}</Typography>
-                    <Typography><strong>Created:</strong> {new Date(runner.createdAt).toLocaleString()}</Typography>
-                    <Typography><strong>Raw status:</strong> {runner.dockerRawStatus || 'unknown'}</Typography>
-                  </Grid>
-                </Grid>
+                  {!editing && (
+                    <div className="mb-3">
+                      <label className="form-label">GitHub API token</label>
+                      <select
+                        className="form-select"
+                        value={formState.selectedTokenId}
+                        onChange={(event) => {
+                          const token = githubTokens.find((item) => item.id === event.target.value) || null;
+                          setSelectedRepoOption(null);
+                          setFormState({
+                            ...formState,
+                            selectedTokenId: token?.id || '',
+                            owner: token?.login || '',
+                            repo: ''
+                          });
+                        }}
+                      >
+                        <option value="">Select a saved token</option>
+                        {githubTokens.map((token) => (
+                          <option key={token.id} value={token.id}>{token.name} ({token.login})</option>
+                        ))}
+                      </select>
+                      <div className="form-text">Select a saved token to load repositories and derive the owner.</div>
+                    </div>
+                  )}
 
-                <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 2 }}>
-                  <Button variant="outlined" onClick={() => runAction(runner.id, 'start')}>
-                    ▶️ Start
-                  </Button>
-                  <Button variant="outlined" color="error" onClick={() => runAction(runner.id, 'stop')}>
-                    ⏹️ Stop
-                  </Button>
-                  <Button variant="outlined" onClick={() => runAction(runner.id, 'restart')}>
-                    🔄 Restart
-                  </Button>
-                  <Button variant="outlined" color="secondary" onClick={() => openDialog(runner)}>
-                    ✏️ Edit
-                  </Button>
-                  <Button variant="outlined" color="inherit" onClick={() => deleteRunner(runner.id)}>
-                    🗑️ Delete
-                  </Button>
-                </Stack>
-              </Card>
-            ))}
-          </Stack>
-        )}
-      </Stack>
+                  <div className="mb-3">
+                    <label className="form-label">Owner / organization</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formState.owner}
+                      onChange={(event) => {
+                        setFormState({ ...formState, owner: event.target.value });
+                        setSelectedRepoOption(null);
+                      }}
+                      disabled={Boolean(editing)}
+                    />
+                    <div className="form-text">
+                      {editing
+                        ? 'Owner set for this runner and cannot be changed from this edit view.'
+                        : 'Derived from the selected token or selected repository. Edit for org or alternate owner.'}
+                    </div>
+                  </div>
 
-      <Dialog open={showDialog} onClose={closeDialog} fullWidth maxWidth="md">
-        <DialogTitle>{editing ? 'Edit runner' : 'Add runner'}</DialogTitle>
-        <DialogContent>
-          <Box sx={{ mb: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.paper' }}>
-            <Typography variant="subtitle2" gutterBottom>
-              Hidden configuration
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              GitHub Base URL, Host container name, and Runner root path are managed by the extension and are not editable here.
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Default values used:
-            </Typography>
-            <Typography variant="body2" component="div" color="text.secondary">
-              • GitHub Base URL: {GITHUB_BASE_URL}
-            </Typography>
-            <Typography variant="body2" component="div" color="text.secondary">
-              • Host container name: {DEFAULT_HOST_CONTAINER_NAME}
-            </Typography>
-            <Typography variant="body2" component="div" color="text.secondary">
-              • Runner root path: {DEFAULT_RUNNER_ROOT_PATH}
-            </Typography>
-          </Box>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <TextField
-              label="Runner name"
-              value={formState.runnerName}
-              onChange={(event) => setFormState({ ...formState, runnerName: event.target.value })}
-              helperText="A local identifier for this runner. It becomes the runner directory name inside the host container."
-              fullWidth
-            />
-            <TextField
-              label="User or org name"
-              value={formState.owner}
-              onChange={(event) => {
-                const owner = event.target.value;
-                setFormState({ ...formState, owner });
-                setOwnerValid(null);
-                setRepoValid(null);
-                setOwnerValidationMessage('');
-                setRepoValidationMessage('');
-              }}
-              onBlur={() => verifyOwner(formState.owner)}
-              helperText=" "
-              FormHelperTextProps={{ sx: { visibility: 'hidden' } }}
-              error={ownerValid === false}
-              fullWidth
-              InputProps={{
-                endAdornment: renderValidationAdornment(ownerValid, ownerChecking)
-              }}
-            />
-            {ownerValid === false && ownerValidationMessage ? (
-              <Alert severity="error" sx={{ mt: 1 }}>
-                {ownerValidationMessage}
-              </Alert>
-            ) : null}
-            <TextField
-              label="Repository name"
-              value={formState.repo}
-              onChange={(event) => {
-                const repo = event.target.value;
-                setFormState({ ...formState, repo });
-                setRepoValid(null);
-                setRepoValidationMessage('');
-              }}
-              onBlur={() => verifyRepo(formState.owner, formState.repo)}
-              helperText=" "
-              FormHelperTextProps={{ sx: { visibility: 'hidden' } }}
-              error={repoValid === false}
-              fullWidth
-              InputProps={{
-                endAdornment: renderValidationAdornment(repoValid, repoChecking)
-              }}
-            />
-            {repoValid === false && repoValidationMessage ? (
-              <Alert severity="error" sx={{ mt: 1 }}>
-                {repoValidationMessage}
-              </Alert>
-            ) : null}
-            {!editing && (
-              <TextField
-                label="GitHub registration token"
-                type="password"
-                value={formState.registrationToken}
-                onChange={(event) => setFormState({ ...formState, registrationToken: event.target.value })}
-                helperText="A runner registration token from GitHub Actions settings. Create one in your repo or org settings."
-                fullWidth
-              />
-            )}
-            <Autocomplete
-              multiple
-              freeSolo
-              options={labelOptions}
-              value={formState.labels}
-              onChange={(_, value) => setFormState({ ...formState, labels: value as string[] })}
-              renderTags={(value, getTagProps) =>
-                value.map((option, index) => <Chip label={option} {...getTagProps({ index })} key={option} />)
-              }
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Runner labels"
-                  placeholder="Add runner labels"
-                  helperText="Optional labels used by GitHub workflows to target this runner."
-                />
-              )}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={closeDialog}>Cancel</Button>
-          <Button variant="contained" onClick={saveRunner}>
-            Save runner
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+                  {!editing ? (
+                    <div className="row gx-2 gy-3 align-items-end mb-3">
+                      <div className="col-12 col-md-9">
+                        <label className="form-label">Repository</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          list="reposList"
+                          value={formState.repo}
+                          onChange={(event) => setFormState({ ...formState, repo: event.target.value })}
+                          disabled={!formState.selectedTokenId}
+                          placeholder="Pick or type a repository"
+                        />
+                        <datalist id="reposList">
+                          {repoOptions.map((repo) => (
+                            <option key={repo.id} value={repo.full_name} />
+                          ))}
+                        </datalist>
+                        <div className="form-text">Pick a repository from the selected token. Leave blank for an organization-level runner.</div>
+                      </div>
+                      <div className="col-12 col-md-3">
+                        <button
+                          type="button"
+                          className="btn btn-outline-secondary w-100"
+                          disabled={!formState.selectedTokenId || repoLoading}
+                          onClick={() => {
+                            if (formState.selectedTokenId) {
+                              void loadReposForToken(formState.selectedTokenId);
+                            }
+                          }}
+                        >
+                          {repoLoading ? 'Refreshing…' : 'Refresh repos'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-3">
+                      <label className="form-label">Repository name</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={formState.repo}
+                        onChange={(event) => setFormState({ ...formState, repo: event.target.value })}
+                        placeholder="Repository name"
+                      />
+                      <div className="form-text">Target repository name. Leave blank for an organization-level runner.</div>
+                    </div>
+                  )}
+
+                  {!editing && (
+                    <div className="mb-3">
+                      <label className="form-label">Runner group</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        list="runnerGroupsList"
+                        value={formState.runnerGroup || ''}
+                        onChange={(event) => setFormState({ ...formState, runnerGroup: event.target.value })}
+                        disabled={runnerGroups.length === 0}
+                        placeholder="Select or type a runner group"
+                      />
+                      <datalist id="runnerGroupsList">
+                        {runnerGroups.map((group) => (
+                          <option key={group.id} value={group.name} />
+                        ))}
+                      </datalist>
+                      <div className="form-text">Optional runner group for organization or repo runners.</div>
+                    </div>
+                  )}
+
+                  <div className="mb-3">
+                    <label className="form-label">Runner labels</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formState.labels.join(', ')}
+                      onChange={(event) => setFormState({
+                        ...formState,
+                        labels: event.target.value.split(',').map((label) => label.trim()).filter(Boolean)
+                      })}
+                      placeholder="e.g. self-hosted,docker,linux"
+                    />
+                    <div className="form-text">Comma-separated labels used by GitHub workflows to target this runner.</div>
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-secondary" onClick={closeDialog} disabled={saving}>
+                    Cancel
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={() => { void saveRunner(); }} disabled={saving}>
+                    {saving ? 'Saving…' : 'Save runner'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show" />
+        </>
+      )}
+    </div>
   );
 }

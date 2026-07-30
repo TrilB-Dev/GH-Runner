@@ -1,5 +1,6 @@
 {
-  "icon": "docker.svg",
+  "version": "0.0.1",
+  "icon": "GH-Runner-Logo-Icon.svg",
   "vm": {
     "composefile": "docker-compose.yaml",
     "exposes": {
@@ -8,7 +9,7 @@
   },
   "ui": {
     "dashboard-tab": {
-      "title": "Gh Runner",
+      "title": "GH Runner Manager",
       "src": "index.html",
       "root": "ui"
     }

@@ -24,13 +24,15 @@ LABEL org.opencontainers.image.title="GH Runner" \
     org.opencontainers.image.vendor="TrilB.Dev" \
     com.docker.desktop.extension.api.version="0.4.2" \
     com.docker.extension.screenshots="" \
-    com.docker.desktop.extension.icon="docker.svg" \
+    com.docker.desktop.extension.icon="https://trilb.dev/wp-content/uploads/2026/07/GH-Runner-Logo-Icon.svg" \
     com.docker.extension.detailed-description="" \
-    com.docker.extension.publisher-url="" \
+    com.docker.extension.publisher-url="https://trilb.dev/" \
     com.docker.extension.additional-urls="" \
     com.docker.extension.categories="" \
     com.docker.extension.changelog=""
 COPY docker-compose.yaml /docker-compose.yaml
 COPY metadata.json /metadata.json
-COPY docker.svg /docker.svg
+COPY GH-Runner-Logo-Icon.svg /GH-Runner-Logo-Icon.svg
+##COPY GH-Runner-Logo.svg /GH-Runner-Logo.svg
+COPY Assets /Assets
 CMD ["node", "/backend/server.js", "--socket", "/run/guest-services/backend.sock"]

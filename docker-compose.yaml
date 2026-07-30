@@ -1,3 +1,14 @@
 services:
   gh-runner:
     image: ${DESKTOP_PLUGIN_IMAGE}
+    volumes:
+      - gh-runner-data:/backend/data
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  gh-runner-data:
+    name: gh-runner-manager-data
+    driver: local
+  gh-runner-runners:
+    name: gh-runner-manager-runners
+    driver: local

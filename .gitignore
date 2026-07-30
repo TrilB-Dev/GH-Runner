@@ -1,3 +1,6 @@
 node_modules
 ui/build
 Backup/
+Assets/Logo/OG/
+Assets/Logo/Extras/
+build-*.txt
