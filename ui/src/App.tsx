@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Tooltip from 'bootstrap/js/dist/tooltip';
 import { createDockerDesktopClient } from '@docker/extension-api-client';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+  faGear,
+  faPlay,
+  faStop,
+  faRotateRight,
+  faPlus,
+  faPen,
+  faTrash,
+  faSync
+} from '@fortawesome/free-solid-svg-icons';
 
 const client = createDockerDesktopClient();
 
@@ -339,6 +351,14 @@ export function App() {
   }, [settingsOpen, loadGithubTokensList]);
 
   useEffect(() => {
+    const tooltipTriggerList = Array.from(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    const tooltipList = tooltipTriggerList.map((tooltipTriggerEl) => new Tooltip(tooltipTriggerEl));
+    return () => {
+      tooltipList.forEach((tooltip) => tooltip.dispose());
+    };
+  }, [runners, settingsOpen, showDialog]);
+
+  useEffect(() => {
     if (!editing) {
       if (selectedToken) {
         setFormState((prev) => ({
@@ -450,6 +470,16 @@ export function App() {
     }
   };
 
+  const anyRunnerRunning = useMemo(
+    () => runners.some((runner) => runner.status === 'on'),
+    [runners]
+  );
+
+  const anyRunnerStopped = useMemo(
+    () => runners.some((runner) => runner.status !== 'on'),
+    [runners]
+  );
+
   const runAction = async (id: string, action: 'start' | 'stop' | 'restart') => {
     if (!service) {
       setError('Unable to access the Docker VM service.');
@@ -463,6 +493,41 @@ export function App() {
       await loadRunners();
     } catch (err) {
       setError(formatError(err));
+    }
+  };
+
+  const runAllAction = async (action: 'start' | 'stop' | 'restart') => {
+    if (!service) {
+      setError('Unable to access the Docker VM service.');
+      return;
+    }
+
+    if (action === 'stop' || action === 'restart') {
+      const prompt =
+        action === 'stop'
+          ? 'Stop all runners now? Existing jobs may be interrupted.'
+          : 'Restart all runners now? This will stop and then start every runner.';
+      if (!window.confirm(prompt)) {
+        return;
+      }
+    }
+
+    setError(null);
+    setBackendMessage(
+      action === 'start'
+        ? 'Starting all runners...'
+        : action === 'stop'
+        ? 'Stopping all runners...'
+        : 'Restarting all runners...'
+    );
+
+    try {
+      await service.post(`/api/runners/all/${action}`, {});
+      await loadRunners();
+      setBackendMessage('All runners updated successfully.');
+    } catch (err) {
+      setError(formatError(err));
+      setBackendMessage(null);
     }
   };
 
@@ -515,21 +580,35 @@ export function App() {
         <div className="d-flex align-items-center gap-3">
           <img src="./GH-Runner-Logo.svg" alt="GitHub Runner Manager" style={{ height: 128 }} />
           <div>
-            <h1 className="h4 mb-1">GitHub Runner Manager</h1>
-            <p className="text-muted mb-0">Manage GitHub self-hosted runners inside Docker Desktop.</p>
+            {/* <h1 className="h4 mb-1">GitHub Runner Manager</h1> */}
+            <p className="text-muted mb-0">Manage all of your GitHub self-hosted runners inside Docker Desktop.</p>
           </div>
         </div>
-        <button
-          type="button"
-          className="btn btn-outline-secondary"
-          onClick={() => {
-            void loadGithubTokensList();
-            setSettingsOpen(true);
-          }}
-          aria-label="Settings"
-        >
-          ⚙️
-        </button>
+        <div className="btn-group btn-group-sm">
+          <button 
+            type="button" 
+            className="btn btn-primary" 
+            onClick={refreshHostContainer}
+            aria-label="Refresh host container"
+            data-bs-toggle="tooltip"
+            title="Refresh host"
+          >
+              <FontAwesomeIcon icon={faSync} fixedWidth />
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              void loadGithubTokensList();
+              setSettingsOpen(true);
+            }}
+            aria-label="Settings"
+            data-bs-toggle="tooltip"
+            title="Settings"
+          >
+            <FontAwesomeIcon icon={faGear} fixedWidth />
+          </button>
+        </div>
       </div>
 
       {error ? <div className="alert alert-danger">{error}</div> : null}
@@ -537,12 +616,55 @@ export function App() {
 
       <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-2">
         <h2 className="h5 mb-0">Runners</h2>
-        <div className="btn-group">
-          <button type="button" className="btn btn-outline-primary" onClick={refreshHostContainer}>
-            🔄 Refresh host
+        <div className="btn-group btn-group-sm">
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={!anyRunnerStopped}
+            onClick={() => {
+              void runAllAction('start');
+            }}
+            aria-label="Start all runners"
+            data-bs-toggle="tooltip"
+            title="Start all"
+          >
+            <FontAwesomeIcon icon={faPlay} fixedWidth />
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => openDialog()}>
-            + Add runner
+          <button
+            type="button"
+            className="btn btn-danger"
+            disabled={!anyRunnerRunning}
+            onClick={() => {
+              void runAllAction('stop');
+            }}
+            aria-label="Stop all runners"
+            data-bs-toggle="tooltip"
+            title="Stop all"
+          >
+            <FontAwesomeIcon icon={faStop} fixedWidth />
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={runners.length === 0}
+            onClick={() => {
+              void runAllAction('restart');
+            }}
+            aria-label="Restart all runners"
+            data-bs-toggle="tooltip"
+            title="Restart all"
+          >
+            <FontAwesomeIcon icon={faRotateRight} fixedWidth />
+          </button>
+          <button
+            type="button"
+            className="btn btn-success"
+            onClick={() => openDialog()}
+            aria-label="Add runner"
+            data-bs-toggle="tooltip"
+            title="Add runner"
+          >
+            <FontAwesomeIcon icon={faPlus} fixedWidth />
           </button>
         </div>
       </div>
@@ -614,7 +736,7 @@ export function App() {
                     </div>
                     {tokenFormError ? <div className="alert alert-danger">{tokenFormError}</div> : null}
                     {tokenActionMessage ? <div className="alert alert-success">{tokenActionMessage}</div> : null}
-                    <button type="button" className="btn btn-primary" onClick={createGithubToken}>
+                    <button type="button" className="btn btn-primary" onClick={createGithubToken} data-bs-toggle="tooltip" title="Save token">
                       Save token
                     </button>
                     <div className="mt-3 text-muted small">
@@ -626,7 +748,7 @@ export function App() {
                   </div>
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="btn btn-secondary" onClick={() => setSettingsOpen(false)}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setSettingsOpen(false)} data-bs-toggle="tooltip" title="Close">
                     Close
                   </button>
                 </div>
@@ -654,27 +776,23 @@ export function App() {
           {runners.map((runner, index) => (
             <div className="accordion-item" key={runner.id}>
               <h2 className="accordion-header" id={`heading-${runner.id}`}>
-                <button
-                  className="accordion-button collapsed"
-                  type="button"
-                  data-bs-toggle="collapse"
-                  data-bs-target={`#collapse-${runner.id}`}
-                  aria-expanded="false"
-                  aria-controls={`collapse-${runner.id}`}
-                >
-                  <div className="d-flex w-100 justify-content-between align-items-center">
-                    <div>
-                      <strong>{runner.runnerName}</strong>
-                      <div className="text-muted small">{runner.hostContainerName} · {runner.runnerPath}</div>
+                <div className="d-flex align-items-center gap-2">
+                  <button
+                    className="accordion-button collapsed flex-grow-1"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target={`#collapse-${runner.id}`}
+                    aria-expanded="false"
+                    aria-controls={`collapse-${runner.id}`}
+                  >
+                    <div className="d-flex justify-content-between align-items-center w-100">
+                      <div>
+                        <strong>{runner.runnerName}</strong>
+                        <div className="text-muted small">{runner.hostContainerName} · {runner.runnerPath}</div>
+                      </div>
                     </div>
-                    <div className="d-flex align-items-center gap-2">
-                      <span className={`badge rounded-pill text-capitalize bg-${runner.status === 'on' ? 'success' : runner.status === 'paused' ? 'warning' : 'secondary'}`}>
-                        {runner.status}
-                      </span>
-                      <span>▾</span>
-                    </div>
-                  </div>
-                </button>
+                  </button>
+                </div>
               </h2>
               <div
                 id={`collapse-${runner.id}`}
@@ -683,7 +801,28 @@ export function App() {
                 data-bs-parent="#runnerAccordion"
               >
                 <div className="accordion-body">
-                  <div className="row gy-3">
+                  <div className="row">
+                    <div className="col align-right d-flex justify-content-end">
+                      <div className="btn-group btn-group-sm" style={{ paddingRight: '10px' }}>
+                        <button type="button" className="btn btn-success" disabled={runner.status === 'on'} onClick={() => runAction(runner.id, 'start')} data-bs-toggle="tooltip" title="Start">
+                          <FontAwesomeIcon icon={faPlay} fixedWidth />
+                        </button>
+                        <button type="button" className="btn btn-danger" disabled={runner.status !== 'on'} onClick={() => runAction(runner.id, 'stop')} data-bs-toggle="tooltip" title="Stop">
+                          <FontAwesomeIcon icon={faStop} fixedWidth />
+                        </button>
+                        <button type="button" className="btn btn-primary" disabled={runner.status !== 'on'} onClick={() => runAction(runner.id, 'restart')} data-bs-toggle="tooltip" title="Restart">
+                          <FontAwesomeIcon icon={faRotateRight} fixedWidth />
+                        </button>
+                        <button type="button" className="btn btn-success" onClick={() => openDialog(runner)} data-bs-toggle="tooltip" title="Edit">
+                          <FontAwesomeIcon icon={faPen} fixedWidth />
+                        </button>
+                        <button type="button" className="btn btn-danger" onClick={() => deleteRunner(runner.id)} data-bs-toggle="tooltip" title="Delete">
+                          <FontAwesomeIcon icon={faTrash} fixedWidth />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="row gy-3 mt-2">
                     <div className="col-12 col-md-6">
                       <p className="mb-1"><strong>GitHub URL:</strong> {runner.githubUrl}</p>
                       <p className="mb-1"><strong>Owner:</strong> {runner.owner}</p>
@@ -694,23 +833,6 @@ export function App() {
                       <p className="mb-1"><strong>Created:</strong> {new Date(runner.createdAt).toLocaleString()}</p>
                       <p className="mb-0"><strong>Raw status:</strong> {runner.dockerRawStatus || 'unknown'}</p>
                     </div>
-                  </div>
-                  <div className="d-flex flex-wrap gap-2 mt-3">
-                    <button type="button" className="btn btn-outline-primary" disabled={runner.status === 'on'} onClick={() => runAction(runner.id, 'start')}>
-                      ▶️ Start
-                    </button>
-                    <button type="button" className="btn btn-outline-danger" disabled={runner.status !== 'on'} onClick={() => runAction(runner.id, 'stop')}>
-                      ⏹️ Stop
-                    </button>
-                    <button type="button" className="btn btn-outline-secondary" disabled={runner.status !== 'on'} onClick={() => runAction(runner.id, 'restart')}>
-                      🔄 Restart
-                    </button>
-                    <button type="button" className="btn btn-outline-success" onClick={() => openDialog(runner)}>
-                      ✏️ Edit
-                    </button>
-                    <button type="button" className="btn btn-outline-dark" onClick={() => deleteRunner(runner.id)}>
-                      🗑️ Delete
-                    </button>
                   </div>
                 </div>
               </div>
@@ -872,10 +994,10 @@ export function App() {
                   </div>
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="btn btn-secondary" onClick={closeDialog} disabled={saving}>
+                  <button type="button" className="btn btn-secondary" onClick={closeDialog} disabled={saving} data-bs-toggle="tooltip" title="Cancel">
                     Cancel
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={() => { void saveRunner(); }} disabled={saving}>
+                  <button type="button" className="btn btn-primary" onClick={() => { void saveRunner(); }} disabled={saving} data-bs-toggle="tooltip" title="Save runner">
                     {saving ? 'Saving…' : 'Save runner'}
                   </button>
                 </div>

@@ -413,6 +413,39 @@ app.delete('/api/runners/:id', async (req: Request, res: Response) => {
   }
 });
 
+app.post('/api/runners/all/:action', async (req: Request, res: Response) => {
+  try {
+    const action = req.params.action as 'start' | 'stop' | 'restart';
+    const runners = await loadRunners();
+
+    if (runners.length === 0) {
+      return res.status(200).json({ success: true, message: 'No runners to update.' });
+    }
+
+    await ensureRunnerHostContainer(DEFAULT_HOST_CONTAINER_NAME);
+
+    for (const runner of runners) {
+      switch (action) {
+        case 'start':
+          await startHostRunner(runner.hostContainerName, runner.runnerPath);
+          break;
+        case 'stop':
+          await stopHostRunner(runner.hostContainerName, runner.runnerPath);
+          break;
+        case 'restart':
+          await restartHostRunner(runner.hostContainerName, runner.runnerPath);
+          break;
+        default:
+          return res.status(400).json({ error: 'Invalid action.' });
+      }
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: String(error) });
+  }
+});
+
 app.post('/api/runners/:id/:action', async (req: Request, res: Response) => {
   try {
     const id = req.params.id;
