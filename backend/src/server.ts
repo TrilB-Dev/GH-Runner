@@ -419,28 +419,45 @@ app.post('/api/runners/all/:action', async (req: Request, res: Response) => {
     const runners = await loadRunners();
 
     if (runners.length === 0) {
-      return res.status(200).json({ success: true, message: 'No runners to update.' });
+      return res.status(200).json({ success: true, results: [] });
     }
 
     await ensureRunnerHostContainer(DEFAULT_HOST_CONTAINER_NAME);
 
-    for (const runner of runners) {
-      switch (action) {
-        case 'start':
-          await startHostRunner(runner.hostContainerName, runner.runnerPath);
-          break;
-        case 'stop':
-          await stopHostRunner(runner.hostContainerName, runner.runnerPath);
-          break;
-        case 'restart':
-          await restartHostRunner(runner.hostContainerName, runner.runnerPath);
-          break;
-        default:
-          return res.status(400).json({ error: 'Invalid action.' });
-      }
-    }
+    const results = await Promise.all(
+      runners.map(async (runner) => {
+        try {
+          switch (action) {
+            case 'start':
+              await startHostRunner(runner.hostContainerName, runner.runnerPath);
+              break;
+            case 'stop':
+              await stopHostRunner(runner.hostContainerName, runner.runnerPath);
+              break;
+            case 'restart':
+              await restartHostRunner(runner.hostContainerName, runner.runnerPath);
+              break;
+            default:
+              throw new Error('Invalid action.');
+          }
 
-    res.json({ success: true });
+          return {
+            id: runner.id,
+            runnerName: runner.runnerName,
+            success: true
+          };
+        } catch (error) {
+          return {
+            id: runner.id,
+            runnerName: runner.runnerName,
+            success: false,
+            error: String(error)
+          };
+        }
+      })
+    );
+
+    res.json({ success: true, results });
   } catch (error) {
     res.status(500).json({ error: String(error) });
   }
@@ -449,7 +466,7 @@ app.post('/api/runners/all/:action', async (req: Request, res: Response) => {
 app.post('/api/runners/:id/:action', async (req: Request, res: Response) => {
   try {
     const id = req.params.id;
-    const action = req.params.action;
+    const action = req.params.action as 'start' | 'stop' | 'restart';
     const runners = await loadRunners();
     const runner = runners.find((r) => r.id === id);
     if (!runner) {
@@ -472,7 +489,7 @@ app.post('/api/runners/:id/:action', async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'Invalid action.' });
     }
 
-    res.json({ success: true });
+    res.json({ success: true, runnerName: runner.runnerName });
   } catch (error) {
     res.status(500).json({ error: String(error) });
   }

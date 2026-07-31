@@ -324,6 +324,50 @@ app.delete('/api/runners/:id', async (req, res) => {
         res.status(500).json({ error: String(error) });
     }
 });
+app.post('/api/runners/all/:action', async (req, res) => {
+    try {
+        const action = req.params.action;
+        const runners = await (0, runnerStorage_1.loadRunners)();
+        if (runners.length === 0) {
+            return res.status(200).json({ success: true, results: [] });
+        }
+        await (0, docker_1.ensureRunnerHostContainer)(DEFAULT_HOST_CONTAINER_NAME);
+        const results = await Promise.all(runners.map(async (runner) => {
+            try {
+                switch (action) {
+                    case 'start':
+                        await (0, docker_1.startHostRunner)(runner.hostContainerName, runner.runnerPath);
+                        break;
+                    case 'stop':
+                        await (0, docker_1.stopHostRunner)(runner.hostContainerName, runner.runnerPath);
+                        break;
+                    case 'restart':
+                        await (0, docker_1.restartHostRunner)(runner.hostContainerName, runner.runnerPath);
+                        break;
+                    default:
+                        throw new Error('Invalid action.');
+                }
+                return {
+                    id: runner.id,
+                    runnerName: runner.runnerName,
+                    success: true
+                };
+            }
+            catch (error) {
+                return {
+                    id: runner.id,
+                    runnerName: runner.runnerName,
+                    success: false,
+                    error: String(error)
+                };
+            }
+        }));
+        res.json({ success: true, results });
+    }
+    catch (error) {
+        res.status(500).json({ error: String(error) });
+    }
+});
 app.post('/api/runners/:id/:action', async (req, res) => {
     try {
         const id = req.params.id;
@@ -347,7 +391,7 @@ app.post('/api/runners/:id/:action', async (req, res) => {
             default:
                 return res.status(400).json({ error: 'Invalid action.' });
         }
-        res.json({ success: true });
+        res.json({ success: true, runnerName: runner.runnerName });
     }
     catch (error) {
         res.status(500).json({ error: String(error) });

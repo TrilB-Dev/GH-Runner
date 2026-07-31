@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Tooltip from 'bootstrap/js/dist/tooltip';
 import { createDockerDesktopClient } from '@docker/extension-api-client';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -109,6 +109,14 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [backendMessage, setBackendMessage] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const confirmActionRef = useRef<(() => Promise<void>) | null>(null);
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean;
+    title: string;
+    body: string;
+    confirmLabel: string;
+    confirmVariant: string;
+  } | null>(null);
   const [tokenFormName, setTokenFormName] = useState('');
   const [tokenFormValue, setTokenFormValue] = useState('');
   const [tokenFormError, setTokenFormError] = useState<string | null>(null);
@@ -122,6 +130,39 @@ export function App() {
   const [runnerGroupLoading, setRunnerGroupLoading] = useState(false);
 
   const service = ddClient.extension.vm?.service;
+
+  const closeConfirmDialog = useCallback(() => {
+    confirmActionRef.current = null;
+    setConfirmState(null);
+  }, []);
+
+  const handleConfirm = useCallback(async () => {
+    const action = confirmActionRef.current;
+    closeConfirmDialog();
+    if (action) {
+      await action();
+    }
+  }, [closeConfirmDialog]);
+
+  const openConfirmDialog = useCallback(
+    (
+      title: string,
+      body: string,
+      confirmAction: () => Promise<void>,
+      confirmLabel = 'Confirm',
+      confirmVariant = 'btn-primary'
+    ) => {
+      confirmActionRef.current = confirmAction;
+      setConfirmState({
+        open: true,
+        title,
+        body,
+        confirmLabel,
+        confirmVariant
+      });
+    },
+    []
+  );
 
   const formatError = useCallback((err: unknown) => {
     const timeoutMessage = 'The backend did not respond in time. The extension backend may still be starting. Please wait a moment and try again.';
@@ -455,15 +496,21 @@ export function App() {
 
       if (editing) {
         await service.put(`/api/runners/${editing.id}`, payload);
+        setBackendMessage(`${formState.runnerName} Updated Successfully`);
       } else {
         await service.post('/api/runners', payload);
+        setBackendMessage(`${formState.runnerName} Started Successfully`);
       }
 
       closeDialog();
       await loadRunners();
-      setBackendMessage('Runner saved successfully.');
     } catch (err) {
-      setError(formatError(err));
+      const message = formatError(err);
+      if (editing) {
+        setError(`${formState.runnerName} Failed to Update with error: ${message}`);
+      } else {
+        setError(`${formState.runnerName} Failed to start with error: ${message}`);
+      }
       setBackendMessage(null);
     } finally {
       setSaving(false);
@@ -486,13 +533,22 @@ export function App() {
       return;
     }
 
+    const runner = runners.find((run) => run.id === id);
+    const runnerName = runner?.runnerName ?? 'Runner';
+    const actionLabel = action === 'start' ? 'Start' : action === 'stop' ? 'Stop' : 'Restart';
     setError(null);
+    setBackendMessage(`${actionLabel}ing ${runnerName}...`);
 
     try {
-      await service.post(`/api/runners/${id}/${action}`, {});
+      const response = (await service.post(`/api/runners/${id}/${action}`, {})) as { success: true; runnerName: string };
+      await delay(1000);
       await loadRunners();
+      const name = response.runnerName || runnerName;
+      setBackendMessage(`${name} ${action === 'start' ? 'Started Successfully' : action === 'stop' ? 'Stopped Successfully' : 'Restarted Successfully'}`);
     } catch (err) {
-      setError(formatError(err));
+      const message = formatError(err);
+      setError(`${runnerName} failed to ${action} with error: ${message}`);
+      setBackendMessage(null);
     }
   };
 
@@ -502,33 +558,54 @@ export function App() {
       return;
     }
 
+    const actionLabel = action === 'start' ? 'starting' : action === 'stop' ? 'stopping' : 'restarting';
+    const perform = async () => {
+      setError(null);
+      setBackendMessage(`Performing ${actionLabel} on all runners...`);
+
+      try {
+        const response = (await service.post(`/api/runners/all/${action}`, {})) as {
+          success: true;
+          results: Array<{ id: string; runnerName: string; success: boolean; error?: string }>;
+        };
+        await delay(1000);
+        await loadRunners();
+        const results = response.results || [] as Array<{ id: string; runnerName: string; success: boolean; error?: string }>;
+        const successCount = results.filter((result) => result.success).length;
+        const failureResults = results.filter((result) => !result.success);
+
+        if (successCount > 0) {
+          setBackendMessage(`${successCount} runner${successCount === 1 ? '' : 's'} ${action === 'start' ? 'started' : action === 'stop' ? 'stopped' : 'restarted'} successfully.`);
+        } else {
+          setBackendMessage(null);
+        }
+
+        if (failureResults.length > 0) {
+          const firstError = failureResults[0].error || 'unknown error';
+          setError(`${failureResults.length} runner${failureResults.length === 1 ? '' : 's'} failed to ${action} with error: ${firstError}`);
+        }
+      } catch (err) {
+        setError(formatError(err));
+        setBackendMessage(null);
+      }
+    };
+
     if (action === 'stop' || action === 'restart') {
       const prompt =
         action === 'stop'
           ? 'Stop all runners now? Existing jobs may be interrupted.'
           : 'Restart all runners now? This will stop and then start every runner.';
-      if (!window.confirm(prompt)) {
-        return;
-      }
+      openConfirmDialog(
+        action === 'stop' ? 'Stop all runners' : 'Restart all runners',
+        prompt,
+        perform,
+        action === 'stop' ? 'Stop all' : 'Restart all',
+        action === 'stop' ? 'btn-danger' : 'btn-warning'
+      );
+      return;
     }
 
-    setError(null);
-    setBackendMessage(
-      action === 'start'
-        ? 'Starting all runners...'
-        : action === 'stop'
-        ? 'Stopping all runners...'
-        : 'Restarting all runners...'
-    );
-
-    try {
-      await service.post(`/api/runners/all/${action}`, {});
-      await loadRunners();
-      setBackendMessage('All runners updated successfully.');
-    } catch (err) {
-      setError(formatError(err));
-      setBackendMessage(null);
-    }
+    await perform();
   };
 
   const refreshHostContainer = async () => {
@@ -537,21 +614,26 @@ export function App() {
       return;
     }
 
-    if (!window.confirm('This will recreate the host container and preserve existing runner data. Continue?')) {
-      return;
-    }
+    openConfirmDialog(
+      'Refresh host container',
+      'This will recreate the host container and preserve existing runner data. Continue?',
+      async () => {
+        setError(null);
+        setBackendMessage('Refreshing host container...');
 
-    setError(null);
-    setBackendMessage('Refreshing host container...');
-
-    try {
-      await service.post('/api/host-refresh', {});
-      await loadRunners();
-      setBackendMessage('Host container refresh completed successfully.');
-    } catch (err) {
-      setError(formatError(err));
-      setBackendMessage(null);
-    }
+        try {
+          await service.post('/api/host-refresh', {});
+          await loadRunners();
+          setBackendMessage('Runner Host Container was successfully updated');
+        } catch (err) {
+          const message = formatError(err);
+          setError(`Runner Host Container failed to update with error: ${message}`);
+          setBackendMessage(null);
+        }
+      },
+      'Refresh host',
+      'btn-warning'
+    );
   };
 
   const deleteRunner = async (id: string) => {
@@ -560,23 +642,28 @@ export function App() {
       return;
     }
 
-    if (!window.confirm('Delete this runner and remove its directory from the host container?')) {
-      return;
-    }
+    openConfirmDialog(
+      'Delete runner',
+      'Delete this runner and remove its directory from the host container?',
+      async () => {
+        setError(null);
 
-    setError(null);
-
-    try {
-      await service.delete(`/api/runners/${id}`);
-      loadRunners();
-    } catch (err) {
-      setError(formatError(err));
-    }
+        try {
+          await service.delete(`/api/runners/${id}`);
+          await loadRunners();
+        } catch (err) {
+          setError(formatError(err));
+        }
+      },
+      'Delete runner',
+      'btn-danger'
+    );
   };
 
   return (
-    <div className="container py-4">
-      <div className="d-flex justify-content-between align-items-center mb-4">
+    <div className="container py-4 h-100">
+      <div className="d-flex flex-column">
+        <div className="d-flex justify-content-between align-items-center mb-4">
         <div className="d-flex align-items-center gap-3">
           <img src="./GH-Runner-Logo.svg" alt="GitHub Runner Manager" style={{ height: 128 }} />
           <div>
@@ -587,7 +674,7 @@ export function App() {
         <div className="btn-group btn-group-sm">
           <button 
             type="button" 
-            className="btn btn-primary" 
+            className="btn btn-info" 
             onClick={refreshHostContainer}
             aria-label="Refresh host container"
             data-bs-toggle="tooltip"
@@ -645,7 +732,7 @@ export function App() {
           </button>
           <button
             type="button"
-            className="btn btn-secondary"
+            className="btn btn-warning"
             disabled={runners.length === 0}
             onClick={() => {
               void runAllAction('restart');
@@ -788,8 +875,14 @@ export function App() {
                     <div className="d-flex justify-content-between align-items-center w-100">
                       <div>
                         <strong>{runner.runnerName}</strong>
+                        <div className="text-muted small">
+                          {runner.owner}/{runner.repo || '(org)'} · {runner.labels.length > 0 ? runner.labels.join(', ') : 'no labels'}
+                        </div>
                         <div className="text-muted small">{runner.hostContainerName} · {runner.runnerPath}</div>
                       </div>
+                      <span className={`badge justify-content-end ${runner.status === 'on' ? 'bg-success' : 'bg-danger'}`}>
+                        {runner.status === 'on' ? 'Running' : 'Stopped'}
+                      </span>
                     </div>
                   </button>
                 </div>
@@ -804,13 +897,13 @@ export function App() {
                   <div className="row">
                     <div className="col align-right d-flex justify-content-end">
                       <div className="btn-group btn-group-sm" style={{ paddingRight: '10px' }}>
-                        <button type="button" className="btn btn-success" disabled={runner.status === 'on'} onClick={() => runAction(runner.id, 'start')} data-bs-toggle="tooltip" title="Start">
+                        <button type="button" className="btn btn-primary" disabled={runner.status === 'on'} onClick={() => runAction(runner.id, 'start')} data-bs-toggle="tooltip" title="Start">
                           <FontAwesomeIcon icon={faPlay} fixedWidth />
                         </button>
                         <button type="button" className="btn btn-danger" disabled={runner.status !== 'on'} onClick={() => runAction(runner.id, 'stop')} data-bs-toggle="tooltip" title="Stop">
                           <FontAwesomeIcon icon={faStop} fixedWidth />
                         </button>
-                        <button type="button" className="btn btn-primary" disabled={runner.status !== 'on'} onClick={() => runAction(runner.id, 'restart')} data-bs-toggle="tooltip" title="Restart">
+                        <button type="button" className="btn btn-warning" disabled={runner.status !== 'on'} onClick={() => runAction(runner.id, 'restart')} data-bs-toggle="tooltip" title="Restart">
                           <FontAwesomeIcon icon={faRotateRight} fixedWidth />
                         </button>
                         <button type="button" className="btn btn-success" onClick={() => openDialog(runner)} data-bs-toggle="tooltip" title="Edit">
@@ -1007,6 +1100,33 @@ export function App() {
           <div className="modal-backdrop fade show" />
         </>
       )}
+      {confirmState?.open && (
+        <>
+          <div className="modal fade show" style={{ display: 'block' }} tabIndex={-1} aria-modal="true" role="dialog">
+            <div className="modal-dialog modal-dialog-centered">
+              <div className="modal-content">
+                <div className="modal-header">
+                  <h5 className="modal-title">{confirmState.title}</h5>
+                  <button type="button" className="btn-close" aria-label="Close" onClick={closeConfirmDialog} />
+                </div>
+                <div className="modal-body">
+                  <p>{confirmState.body}</p>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-secondary" onClick={closeConfirmDialog}>
+                    Cancel
+                  </button>
+                  <button type="button" className={`btn ${confirmState.confirmVariant}`} onClick={handleConfirm}>
+                    {confirmState.confirmLabel}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show" />
+        </>
+      )}
     </div>
+  </div>
   );
 }

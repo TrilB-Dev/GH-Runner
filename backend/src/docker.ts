@@ -352,6 +352,18 @@ export async function startHostRunner(hostContainer: string, runnerPath: string)
   await dockerExec(hostContainer, ['sh', '-c', `su ${HOST_RUNNER_USER} -s /bin/sh -c 'cd "${runnerPath}" && nohup ./run.sh >/dev/null 2>&1 &'`]);
 }
 
+async function waitForRunnerStopped(hostContainer: string, runnerPath: string, timeoutMs = 10000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const status = await getHostRunnerStatus(hostContainer, runnerPath);
+    if (status.status === 'off') {
+      return;
+    }
+    await sleep(500);
+  }
+  throw new Error(`Timeout waiting for runner at ${runnerPath} to stop`);
+}
+
 export async function stopHostRunner(hostContainer: string, runnerPath: string) {
   const pids = await findRunnerPids(hostContainer, runnerPath);
   if (!pids) {
@@ -359,6 +371,7 @@ export async function stopHostRunner(hostContainer: string, runnerPath: string) 
   }
 
   await dockerExec(hostContainer, ['sh', '-c', `echo "${pids}" | xargs -r kill || true`]);
+  await waitForRunnerStopped(hostContainer, runnerPath);
 }
 
 export async function restartHostRunner(hostContainer: string, runnerPath: string) {

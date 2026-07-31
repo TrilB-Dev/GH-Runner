@@ -322,12 +322,24 @@ async function createRunnerInHostContainer(hostContainer, runnerPath, githubUrl,
 async function startHostRunner(hostContainer, runnerPath) {
     await dockerExec(hostContainer, ['sh', '-c', `su ${HOST_RUNNER_USER} -s /bin/sh -c 'cd "${runnerPath}" && nohup ./run.sh >/dev/null 2>&1 &'`]);
 }
+async function waitForRunnerStopped(hostContainer, runnerPath, timeoutMs = 10000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        const status = await getHostRunnerStatus(hostContainer, runnerPath);
+        if (status.status === 'off') {
+            return;
+        }
+        await sleep(500);
+    }
+    throw new Error(`Timeout waiting for runner at ${runnerPath} to stop`);
+}
 async function stopHostRunner(hostContainer, runnerPath) {
     const pids = await findRunnerPids(hostContainer, runnerPath);
     if (!pids) {
         return;
     }
     await dockerExec(hostContainer, ['sh', '-c', `echo "${pids}" | xargs -r kill || true`]);
+    await waitForRunnerStopped(hostContainer, runnerPath);
 }
 async function restartHostRunner(hostContainer, runnerPath) {
     await stopHostRunner(hostContainer, runnerPath);

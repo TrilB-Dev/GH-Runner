@@ -26,9 +26,9 @@ LABEL org.opencontainers.image.title="GH Runner" \
     com.docker.extension.screenshots="" \
     com.docker.desktop.extension.icon="https://trilb.dev/wp-content/uploads/2026/07/GH-Runner-Logo-Icon.svg" \
     com.docker.extension.detailed-description="" \
-    com.docker.extension.publisher-url="https://trilb.dev/" \
+    com.docker.extension.publisher-url="https://trilb.dev/collection/software-extension/docker/gh-runner-manager/" \
     com.docker.extension.additional-urls="" \
-    com.docker.extension.categories="" \
+    com.docker.extension.categories="Utility Tools" \
     com.docker.extension.changelog=""
 COPY docker-compose.yaml /docker-compose.yaml
 COPY metadata.json /metadata.json
