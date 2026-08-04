@@ -26,7 +26,7 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getExtensionVersion(): string {
+export function getExtensionVersion(): string {
   try {
     const metadataPath = join(__dirname, '..', '..', 'metadata.json');
     const raw = readFileSync(metadataPath, 'utf8');
@@ -42,7 +42,7 @@ export async function containerExists(containerName: string): Promise<boolean> {
   return raw.trim() === containerName;
 }
 
-export async function volumeExists(volumeName: string): Promise<boolean> {
+export async function getVolumeExists(volumeName: string): Promise<boolean> {
   try {
     const raw = await runDocker(['volume', 'inspect', volumeName]);
     return Boolean(raw);
@@ -52,9 +52,13 @@ export async function volumeExists(volumeName: string): Promise<boolean> {
 }
 
 export async function ensureVolumeExists(volumeName: string) {
-  if (!(await volumeExists(volumeName))) {
+  if (!(await getVolumeExists(volumeName))) {
     await runDocker(['volume', 'create', volumeName]);
   }
+}
+
+export async function removeVolume(volumeName: string) {
+  await runDocker(['volume', 'rm', '-f', volumeName]);
 }
 
 async function getPersistedExtensionVersion(_containerName: string): Promise<string> {
@@ -239,7 +243,7 @@ async function shouldRecreateHostContainer(containerName: string): Promise<boole
   return persistedVersion !== EXTENSION_VERSION;
 }
 
-async function getHostRunnerBaseVersion(hostContainer: string): Promise<string> {
+export async function getHostRunnerBaseVersion(hostContainer: string): Promise<string> {
   try {
     const raw = await dockerExec(hostContainer, ['sh', '-c', `cat ${RUNNER_BASE_VERSION_FILE} 2>/dev/null || true`]);
     return raw.trim();
@@ -264,10 +268,10 @@ async function ensureHostRunnerBase(hostContainer: string) {
 export async function getRunnerHostHealth(containerName: string) {
   const exists = await containerExists(containerName);
   const status = exists ? await getContainerStatus(containerName) : { status: 'off' as const, raw: '' };
-  const runnerInstalled = exists
-    ? Boolean((await dockerExec(containerName, ['sh', '-c', 'test -f /opt/github/runner/config.sh && echo OK || true'])).trim())
+  const hostBootstrapReady = exists
+    ? Boolean((await dockerExec(containerName, ['sh', '-c', 'test -f /opt/github/base/config.sh && echo OK || true'])).trim())
     : false;
-  return { exists, status, runnerInstalled };
+  return { exists, status, runnerInstalled: hostBootstrapReady };
 }
 
 export async function dockerExec(containerName: string, args: string[]): Promise<string> {
@@ -316,6 +320,15 @@ export async function getHostRunnerStatus(hostContainer: string, runnerPath: str
   }
 }
 
+export async function getRunnerVersion(hostContainer: string, runnerPath: string): Promise<string> {
+  try {
+    const raw = await dockerExec(hostContainer, ['sh', '-c', `cat '${runnerPath}/.actions-runner-version' 2>/dev/null || cat '${RUNNER_BASE_VERSION_FILE}' 2>/dev/null || true`]);
+    return raw.trim();
+  } catch {
+    return '';
+  }
+}
+
 export async function createRunnerInHostContainer(
   hostContainer: string,
   runnerPath: string,
@@ -339,10 +352,11 @@ export async function createRunnerInHostContainer(
     `mkdir -p '${runnerPath}'`,
     `mkdir -p '${workDir}'`,
     `cp -a /opt/github/base/. '${runnerPath}/'`,
+    `cp /opt/github/base/.actions-runner-version '${runnerPath}/.actions-runner-version' 2>/dev/null || true`,
     `chown -R ${HOST_RUNNER_USER}:${HOST_RUNNER_USER} '${runnerPath}'`,
     `mkdir -p '${workDir}'`,
     `chown -R ${HOST_RUNNER_USER}:${HOST_RUNNER_USER} '${workDir}'`,
-    `su ${HOST_RUNNER_USER} -s /bin/sh -c 'cd "${runnerPath}" && ./config.sh --url "${repoUrl}" --token "${token}" --name "${runnerName}" --workdir "${workDir}" --labels "${labelSet}" --unattended --replace${groupArg}'`
+    `su ${HOST_RUNNER_USER} -s /bin/sh -c 'cd "${runnerPath}" && ./config.sh --url "${repoUrl}" --token "${token}" --name "${runnerName}" --work "${workDir}" --labels "${labelSet}" --unattended --replace${groupArg}'`
   ].join(' && ');
 
   await dockerExec(hostContainer, ['sh', '-c', setupCommand]);

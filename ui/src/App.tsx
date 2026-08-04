@@ -24,6 +24,7 @@ interface RunnerConfig {
   isOrg: boolean;
   tokenName?: string;
   labels: string[];
+  startOnStartup: boolean;
   hostContainerName: string;
   runnerRootPath: string;
   runnerPath: string;
@@ -33,6 +34,7 @@ interface RunnerConfig {
 interface Runner extends RunnerConfig {
   status: 'on' | 'off' | 'paused';
   dockerRawStatus?: string;
+  runnerVersion?: string;
 }
 
 interface RepoOption {
@@ -51,6 +53,7 @@ interface RunnerForm {
   runnerGroup?: string;
   registrationToken: string;
   labels: string[];
+  startOnStartup?: boolean;
 }
 
 interface GithubTokenResponse {
@@ -87,6 +90,7 @@ type RunnerSavePayload = {
   runnerGroup?: string;
   hostContainerName: string;
   runnerRootPath: string;
+  startOnStartup?: boolean;
 };
 
 const defaultFormState: RunnerForm = {
@@ -96,7 +100,8 @@ const defaultFormState: RunnerForm = {
   repo: '',
   runnerGroup: undefined,
   registrationToken: '',
-  labels: []
+  labels: [],
+  startOnStartup: false
 };
 
 export function App() {
@@ -107,8 +112,51 @@ export function App() {
   const [editing, setEditing] = useState<Runner | null>(null);
   const [formState, setFormState] = useState<RunnerForm>(defaultFormState);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [errorDetailsOpen, setErrorDetailsOpen] = useState(false);
   const [backendMessage, setBackendMessage] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'general' | 'tools' | 'tokens' | 'info'>('general');
+  const [extensionInfo, setExtensionInfo] = useState<{
+    extensionName: string;
+    extensionVersion: string;
+    extensionAuthor: string;
+    documentationUrl: string;
+    githubApiConnection: { status: string; message: string };
+    serviceContainer: { name: string; exists: boolean; status: string; raw: string };
+    runnerContainer: { totalRunners: number; activeRunners: number; status: string };
+    runnerBaseVersion: string;
+    runnerVersions: Array<{ id: string; version: string }>;
+    runnerVersionsOutOfDate: number;
+    runnerVersionMismatch: boolean;
+    dataVolumeExists: boolean;
+    runnerVolumeExists: boolean;
+    configuredGithubTokens: number;
+  } | null>(null);
+  const [startRunnersOnStartup, setStartRunnersOnStartup] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('startRunnersOnStartup') !== 'false';
+  });
+  const [uiStyle, setUiStyle] = useState<'light' | 'dark' | 'system'>(() => {
+    if (typeof window === 'undefined') return 'system';
+    return (window.localStorage.getItem('uiStyle') as 'light' | 'dark' | 'system') || 'system';
+  });
+  const [uiLoggingEnabled, setUiLoggingEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('uiLoggingEnabled') === 'true';
+  });
+  const [runnerLoggingEnabled, setRunnerLoggingEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('runnerLoggingEnabled') === 'true';
+  });
+  const [githubApiLoggingEnabled, setGithubApiLoggingEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('githubApiLoggingEnabled') === 'true';
+  });
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logsContent, setLogsContent] = useState('');
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsCopied, setLogsCopied] = useState(false);
   const confirmActionRef = useRef<(() => Promise<void>) | null>(null);
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
@@ -121,11 +169,13 @@ export function App() {
   const [tokenFormValue, setTokenFormValue] = useState('');
   const [tokenFormError, setTokenFormError] = useState<string | null>(null);
   const [tokenActionMessage, setTokenActionMessage] = useState<string | null>(null);
+  const [showTokenForm, setShowTokenForm] = useState(false);
   const [githubTokens, setGithubTokens] = useState<GithubTokenResponse[]>([]);
   const [repoOptions, setRepoOptions] = useState<RepoOption[]>([]);
   const [selectedRepoOption, setSelectedRepoOption] = useState<RepoOption | null>(null);
   const [saving, setSaving] = useState(false);
   const [repoLoading, setRepoLoading] = useState(false);
+  const [repoDropdownOpen, setRepoDropdownOpen] = useState(false);
   const [runnerGroups, setRunnerGroups] = useState<Array<{id:number;name:string}>>([]);
   const [runnerGroupLoading, setRunnerGroupLoading] = useState(false);
 
@@ -166,18 +216,101 @@ export function App() {
 
   const formatError = useCallback((err: unknown) => {
     const timeoutMessage = 'The backend did not respond in time. The extension backend may still be starting. Please wait a moment and try again.';
+
+    const tryParseJson = (value: string): unknown => {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    };
+
+    const getErrorObjectMessage = (obj: Record<string, unknown>): string => {
+      const errorText = String(obj.error ?? obj.message ?? obj.statusText ?? 'An unknown error occurred.');
+      const detailsCandidates: string[] = [];
+
+      const addDetail = (value: unknown) => {
+        if (typeof value === 'string' && value.trim()) {
+          detailsCandidates.push(value.trim());
+          return;
+        }
+        if (typeof value === 'object' && value !== null) {
+          try {
+            const jsonString = JSON.stringify(value, Object.getOwnPropertyNames(value));
+            detailsCandidates.push(jsonString);
+          } catch {
+            // ignore
+          }
+        }
+      };
+
+      const anyObj = obj as Record<string, any>;
+      addDetail(anyObj.details ?? anyObj.stderr ?? anyObj.stdout ?? anyObj.body ?? anyObj.response?.body ?? anyObj.response?.message ?? anyObj.response?.error ?? anyObj.data);
+      addDetail(anyObj.code ?? anyObj.status);
+      addDetail(anyObj.cmd ?? anyObj.command);
+
+      const details = detailsCandidates.filter(Boolean).join(' | ');
+      if (details) {
+        return `${errorText}${errorText.endsWith('.') ? '' : '.'} ${details}`;
+      }
+      return errorText;
+    };
+
+    const normalizeObject = (source: unknown): string => {
+      if (typeof source === 'string') {
+        const parsed = tryParseJson(source);
+        if (parsed) {
+          return normalizeObject(parsed);
+        }
+        return source;
+      }
+
+      if (source && typeof source === 'object') {
+        const anyErr = source as Record<string, unknown>;
+        if (anyErr.error || anyErr.message || anyErr.statusText) {
+          return getErrorObjectMessage(anyErr);
+        }
+        if (anyErr.response) {
+          return normalizeObject(anyErr.response);
+        }
+        if (anyErr.body) {
+          return normalizeObject(anyErr.body);
+        }
+        if (anyErr.data) {
+          return normalizeObject(anyErr.data);
+        }
+        if (anyErr.message) {
+          return String(anyErr.message);
+        }
+        try {
+          return JSON.stringify(anyErr, Object.getOwnPropertyNames(anyErr));
+        } catch {
+          return 'An unknown error occurred.';
+        }
+      }
+
+      return 'An unknown error occurred.';
+    };
+
     if (err instanceof Error) {
       if (err.name === 'HeadersTimeoutError' || err.message.includes('Headers Timeout')) {
         return timeoutMessage;
       }
+      const anyErr = err as unknown as Record<string, unknown>;
+      if (anyErr.response || anyErr.body || anyErr.data || anyErr.message) {
+        return normalizeObject(anyErr);
+      }
       return err.message;
     }
+
     if (typeof err === 'string') {
       if (err.includes('Headers Timeout')) {
         return timeoutMessage;
       }
-      return err;
+      const parsed = tryParseJson(err);
+      return parsed ? normalizeObject(parsed) : err;
     }
+
     if (typeof err === 'object' && err !== null) {
       const anyErr = err as Record<string, unknown>;
       const name = String(anyErr.name || '');
@@ -185,14 +318,74 @@ export function App() {
       if (name === 'HeadersTimeoutError' || message.includes('Headers Timeout')) {
         return timeoutMessage;
       }
-      try {
-        return JSON.stringify(err, Object.getOwnPropertyNames(err));
-      } catch {
-        return 'An unknown error occurred.';
-      }
+      return normalizeObject(anyErr);
     }
+
     return 'An unknown error occurred.';
   }, []);
+
+  const getErrorDetails = useCallback((err: unknown): string | null => {
+    const tryParseJson = (value: string): unknown => {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return null;
+      }
+    };
+
+    const getDetailsFromObject = (obj: Record<string, any>): string | null => {
+      const parts: string[] = [];
+      const add = (value: unknown) => {
+        if (typeof value === 'string' && value.trim()) {
+          parts.push(value.trim());
+        } else if (typeof value === 'object' && value !== null) {
+          try {
+            parts.push(JSON.stringify(value, null, 2));
+          } catch {
+            // ignore
+          }
+        }
+      };
+
+      add(obj.details);
+      add(obj.stderr);
+      add(obj.stdout);
+      add(obj.body);
+      add(obj.response?.body);
+      add(obj.response?.message);
+      add(obj.response?.error);
+      add(obj.data);
+      add(obj.stack);
+      add(obj.cmd);
+      add(obj.command);
+      add(obj.code ?? obj.status);
+      return parts.length ? parts.join('\n') : null;
+    };
+
+    if (err instanceof Error) {
+      return getDetailsFromObject(err as Record<string, any>);
+    }
+
+    if (typeof err === 'string') {
+      const parsed = tryParseJson(err);
+      if (parsed) {
+        return getErrorDetails(parsed);
+      }
+      return null;
+    }
+
+    if (typeof err === 'object' && err !== null) {
+      return getDetailsFromObject(err as Record<string, any>);
+    }
+
+    return null;
+  }, []);
+
+  const handleError = useCallback((err: unknown) => {
+    handleError(err);
+    setErrorDetails(getErrorDetails(err));
+    setErrorDetailsOpen(false);
+  }, [formatError, getErrorDetails]);
 
   const delay = useCallback((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)), []);
 
@@ -240,9 +433,161 @@ export function App() {
       const tokens = await serviceGet<GithubTokenResponse[]>('/api/github-tokens', 30000);
       setGithubTokens(tokens || []);
     } catch (err) {
-      setError(formatError(err));
+      handleError(err);
     }
   }, [service, serviceGet, formatError]);
+
+  const loadExtensionInfo = useCallback(async () => {
+    if (!service) {
+      return;
+    }
+
+    try {
+      const info = await serviceGet<NonNullable<typeof extensionInfo>>('/api/extension-info', 30000);
+      setExtensionInfo(info);
+    } catch (err) {
+      handleError(err);
+      setExtensionInfo(null);
+    }
+  }, [service, serviceGet, formatError]);
+
+  const loadLoggingSettings = useCallback(async () => {
+    if (!service) {
+      return;
+    }
+
+    try {
+      const settings = await serviceGet<{ uiLoggingEnabled: boolean; runnerLoggingEnabled: boolean; githubApiLoggingEnabled: boolean; startRunnersOnStartup: boolean }>('/api/settings', 30000);
+      setUiLoggingEnabled(settings.uiLoggingEnabled);
+      setRunnerLoggingEnabled(settings.runnerLoggingEnabled);
+      setGithubApiLoggingEnabled(settings.githubApiLoggingEnabled);
+      setStartRunnersOnStartup(settings.startRunnersOnStartup);
+    } catch (err) {
+      handleError(err);
+    }
+  }, [service, serviceGet, formatError]);
+
+  const saveLoggingSettings = useCallback(async (settings: {
+    uiLoggingEnabled: boolean;
+    runnerLoggingEnabled: boolean;
+    githubApiLoggingEnabled: boolean;
+    startRunnersOnStartup?: boolean;
+  }) => {
+    if (!service) {
+      return;
+    }
+
+    try {
+      await service.post('/api/settings', settings);
+    } catch (err) {
+      handleError(err);
+    }
+  }, [service, formatError]);
+
+  const clearVolume = async (volumeName: string, label: string) => {
+    if (!service) {
+      setError('Unable to access the Docker VM service.');
+      return;
+    }
+
+    openConfirmDialog(
+      `Clear ${label} volume`,
+      `WARNING: This will remove all data from the ${label} persistent volume. Continue?`,
+      async () => {
+        setError(null);
+        setBackendMessage(`Clearing ${label} data...`);
+        try {
+          await service.post('/api/clear-volume', { name: volumeName });
+          await loadExtensionInfo();
+          setBackendMessage(`${label} volume cleared successfully.`);
+        } catch (err) {
+          handleError(err);
+          setBackendMessage(null);
+        }
+      },
+      'Clear volume',
+      'btn-danger'
+    );
+  };
+
+  const updateRunners = async () => {
+    if (!service) {
+      setError('Unable to access the Docker VM service.');
+      return;
+    }
+
+    openConfirmDialog(
+      'Update runners',
+      'Refresh the Runner Host to update runner binaries for existing runners.',
+      async () => {
+        setError(null);
+        setBackendMessage('Updating runners...');
+        try {
+          await service.post('/api/host-refresh', {});
+          await loadExtensionInfo();
+          setBackendMessage('Runner update completed.');
+        } catch (err) {
+          handleError(err);
+          setBackendMessage(null);
+        }
+      },
+      'Update runners',
+      'btn-primary'
+    );
+  };
+
+  const loadLogs = useCallback(async () => {
+    if (!service) {
+      return;
+    }
+
+    setLogsLoading(true);
+    try {
+      const response = await serviceGet<{ logs: string }>('/api/logs', 30000);
+      setLogsContent(response.logs || '');
+    } catch (err) {
+      handleError(err);
+      setLogsContent('Unable to load logs.');
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [service, serviceGet, formatError]);
+
+  const copyLogs = async () => {
+    try {
+      await navigator.clipboard.writeText(logsContent || '');
+      setLogsCopied(true);
+      setTimeout(() => setLogsCopied(false), 2000);
+    } catch (err) {
+      setError('Unable to copy logs to clipboard.');
+    }
+  };
+
+  const clearLogs = async () => {
+    if (!service) {
+      setError('Unable to access the Docker VM service.');
+      return;
+    }
+
+    openConfirmDialog(
+      'Clear logs',
+      'This will clear the extension log file. Continue?',
+      async () => {
+        setError(null);
+        setBackendMessage('Clearing logs...');
+        try {
+          await service.post('/api/logs/clear', {});
+          setLogsContent('');
+          setBackendMessage('Logs cleared.');
+        } catch (err) {
+          handleError(err);
+          setBackendMessage(null);
+        }
+      },
+      'Clear logs',
+      'btn-danger'
+    );
+  };
 
   const loadReposForToken = useCallback(async (tokenId: string) => {
     if (!service) {
@@ -252,10 +597,15 @@ export function App() {
     setRepoLoading(true);
     try {
       const repos = await serviceGet<RepoOption[]>(`/api/github-tokens/${encodeURIComponent(tokenId)}/repos`, 30000);
-      setRepoOptions(repos || []);
+      const repoList = repos || [];
+      setRepoOptions(repoList);
+      if (repoList.length > 0) {
+        setRepoDropdownOpen(true);
+      }
     } catch (err) {
-      setError(formatError(err));
+      handleError(err);
       setRepoOptions([]);
+      setRepoDropdownOpen(false);
     } finally {
       setRepoLoading(false);
     }
@@ -266,7 +616,7 @@ export function App() {
       return;
     }
 
-    if (!owner) {
+    if (!owner || (!isOrg && !repo.trim())) {
       setRunnerGroups([]);
       return;
     }
@@ -286,7 +636,7 @@ export function App() {
       );
       setRunnerGroups(groups || []);
     } catch (err) {
-      setError(formatError(err));
+      handleError(err);
       setRunnerGroups([]);
     } finally {
       setRunnerGroupLoading(false);
@@ -315,6 +665,7 @@ export function App() {
       setTokenActionMessage('GitHub token saved successfully.');
       setTokenFormName('');
       setTokenFormValue('');
+      setShowTokenForm(false);
       await loadGithubTokensList();
     } catch (err) {
       setTokenFormError(formatError(err));
@@ -335,7 +686,7 @@ export function App() {
       }
       await loadGithubTokensList();
     } catch (err) {
-      setError(formatError(err));
+      handleError(err);
     }
   };
 
@@ -364,7 +715,7 @@ export function App() {
           await delay(2000);
           continue;
         }
-        setError(formatError(err));
+        handleError(err);
         break;
       }
     }
@@ -383,13 +734,27 @@ export function App() {
   useEffect(() => {
     if (settingsOpen) {
       void loadGithubTokensList();
+      void loadExtensionInfo();
+      void loadLoggingSettings();
       const interval = setInterval(() => {
         void loadGithubTokensList();
+        void loadExtensionInfo();
       }, 30000);
       return () => clearInterval(interval);
     }
     return undefined;
-  }, [settingsOpen, loadGithubTokensList]);
+  }, [settingsOpen, loadGithubTokensList, loadExtensionInfo, loadLoggingSettings]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem('startRunnersOnStartup', JSON.stringify(startRunnersOnStartup));
+    window.localStorage.setItem('uiStyle', uiStyle);
+    window.localStorage.setItem('uiLoggingEnabled', JSON.stringify(uiLoggingEnabled));
+    window.localStorage.setItem('runnerLoggingEnabled', JSON.stringify(runnerLoggingEnabled));
+    window.localStorage.setItem('githubApiLoggingEnabled', JSON.stringify(githubApiLoggingEnabled));
+  }, [startRunnersOnStartup, uiStyle, uiLoggingEnabled, runnerLoggingEnabled, githubApiLoggingEnabled]);
 
   useEffect(() => {
     const tooltipTriggerList = Array.from(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
@@ -409,19 +774,34 @@ export function App() {
         }));
         setSelectedRepoOption(null);
         void loadReposForToken(selectedToken.id);
-        void loadRunnerGroups(selectedToken.id, selectedToken.login, '', true);
       } else {
         setRepoOptions([]);
         setSelectedRepoOption(null);
       }
     }
-  }, [selectedToken, loadReposForToken, loadRunnerGroups, editing]);
+  }, [selectedToken, loadReposForToken, editing]);
+
+  useEffect(() => {
+    if (!showDialog || editing) {
+      return;
+    }
+
+    if (!formState.selectedTokenId) {
+      setRepoDropdownOpen(false);
+    }
+  }, [showDialog, editing, formState.selectedTokenId]);
 
   useEffect(() => {
     if (!editing && selectedToken) {
       void loadRunnerGroups(selectedToken.id, formState.owner, formState.repo, !formState.repo.trim());
     }
   }, [editing, selectedToken, formState.owner, formState.repo, loadRunnerGroups]);
+
+  useEffect(() => {
+    if (!showDialog) {
+      setRepoDropdownOpen(false);
+    }
+  }, [showDialog]);
 
   const openDialog = (runner?: Runner) => {
     if (runner) {
@@ -432,7 +812,8 @@ export function App() {
         owner: runner.owner,
         repo: runner.repo,
         registrationToken: '',
-        labels: runner.labels
+        labels: runner.labels,
+        startOnStartup: runner.startOnStartup
       });
       setSelectedRepoOption(null);
     } else {
@@ -491,7 +872,8 @@ export function App() {
         selectedTokenId: selectedToken?.id || '',
         runnerGroup: formState.runnerGroup,
         hostContainerName: DEFAULT_HOST_CONTAINER_NAME,
-        runnerRootPath: DEFAULT_RUNNER_ROOT_PATH
+        runnerRootPath: DEFAULT_RUNNER_ROOT_PATH,
+        startOnStartup: editing ? formState.startOnStartup : false
       };
 
       if (editing) {
@@ -524,6 +906,11 @@ export function App() {
 
   const anyRunnerStopped = useMemo(
     () => runners.some((runner) => runner.status !== 'on'),
+    [runners]
+  );
+
+  const autoStartRunnerCount = useMemo(
+    () => runners.filter((runner) => runner.startOnStartup).length,
     [runners]
   );
 
@@ -585,7 +972,7 @@ export function App() {
           setError(`${failureResults.length} runner${failureResults.length === 1 ? '' : 's'} failed to ${action} with error: ${firstError}`);
         }
       } catch (err) {
-        setError(formatError(err));
+        handleError(err);
         setBackendMessage(null);
       }
     };
@@ -652,7 +1039,7 @@ export function App() {
           await service.delete(`/api/runners/${id}`);
           await loadRunners();
         } catch (err) {
-          setError(formatError(err));
+          handleError(err);
         }
       },
       'Delete runner',
@@ -687,6 +1074,7 @@ export function App() {
             className="btn btn-secondary"
             onClick={() => {
               void loadGithubTokensList();
+              setSettingsTab('general');
               setSettingsOpen(true);
             }}
             aria-label="Settings"
@@ -695,11 +1083,86 @@ export function App() {
           >
             <FontAwesomeIcon icon={faGear} fixedWidth />
           </button>
+          <button
+            type="button"
+            className={`btn btn-${logsOpen ? 'secondary' : 'outline-secondary'}`}
+            onClick={() => {
+              const nextValue = !logsOpen;
+              setLogsOpen(nextValue);
+              if (nextValue) {
+                void loadLogs();
+              }
+            }}
+            aria-label="Toggle logs panel"
+            data-bs-toggle="tooltip"
+            title="Toggle log panel"
+          >
+            Logs
+          </button>
         </div>
       </div>
 
       {error ? <div className="alert alert-danger">{error}</div> : null}
+      {errorDetails ? (
+        <div className="mb-3">
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            onClick={() => setErrorDetailsOpen((current) => !current)}
+          >
+            {errorDetailsOpen ? 'Hide error details' : 'Show error details'}
+          </button>
+          {errorDetailsOpen ? (
+            <pre className="mt-2 p-3 bg-light text-dark rounded" style={{ whiteSpace: 'pre-wrap', fontSize: '0.9rem' }}>
+              {errorDetails}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
       {backendMessage && !error ? <div className="alert alert-info">{backendMessage}</div> : null}
+      {logsOpen ? (
+        <div className="card mb-3">
+          <div className="card-header d-flex justify-content-between align-items-center">
+            <span>Extension Log Panel</span>
+            <div className="btn-group btn-group-sm">
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={() => {
+                  void loadLogs();
+                }}
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-secondary"
+                onClick={copyLogs}
+                disabled={!logsContent}
+              >
+                {logsCopied ? 'Copied' : 'Copy'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline-danger"
+                onClick={clearLogs}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className="card-body p-3 bg-dark text-white" style={{ minHeight: '220px', whiteSpace: 'pre-wrap', fontFamily: 'monospace', overflowY: 'auto' }}>
+            {logsLoading ? 'Loading logs...' : logsContent || 'No logs available.'}
+          </div>
+        </div>
+      ) : null}
+      {autoStartRunnerCount > 0 ? (
+        <div className="mb-3">
+          <span className="badge bg-info text-dark">
+            {autoStartRunnerCount} runner{autoStartRunnerCount === 1 ? '' : 's'} configured to auto-start
+          </span>
+        </div>
+      ) : null}
 
       <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-2">
         <h2 className="h5 mb-0">Runners</h2>
@@ -766,71 +1229,408 @@ export function App() {
                   <button type="button" className="btn-close" aria-label="Close" onClick={() => setSettingsOpen(false)} />
                 </div>
                 <div className="modal-body py-4">
-                  <div className="mb-4">
-                    <h6>Saved GitHub API tokens</h6>
-                    {githubTokens.length === 0 ? (
-                      <div className="alert alert-info mb-0">No saved GitHub API tokens yet. Add one below to access repository lists in the runner form.</div>
-                    ) : (
-                      githubTokens.map((token) => (
-                        <div className="card mb-3" key={token.id}>
-                          <div className="card-body p-3">
-                            <div className="d-flex justify-content-between align-items-center gap-3">
-                              <div>
-                                <h6 className="mb-1">{token.name}</h6>
-                                <p className="mb-0 text-muted">{token.login} · {token.type} · saved {new Date(token.createdAt).toLocaleDateString()}</p>
+                  <ul className="nav nav-tabs mb-4" role="tablist">
+                    <li className="nav-item" role="presentation">
+                      <button
+                        type="button"
+                        className={`nav-link ${settingsTab === 'general' ? 'active' : ''}`}
+                        onClick={() => setSettingsTab('general')}
+                        role="tab"
+                        aria-selected={settingsTab === 'general'}
+                      >
+                        General
+                      </button>
+                    </li>
+                    <li className="nav-item" role="presentation">
+                      <button
+                        type="button"
+                        className={`nav-link ${settingsTab === 'tools' ? 'active' : ''}`}
+                        onClick={() => setSettingsTab('tools')}
+                        role="tab"
+                        aria-selected={settingsTab === 'tools'}
+                      >
+                        Tools
+                      </button>
+                    </li>
+                    <li className="nav-item" role="presentation">
+                      <button
+                        type="button"
+                        className={`nav-link ${settingsTab === 'tokens' ? 'active' : ''}`}
+                        onClick={() => setSettingsTab('tokens')}
+                        role="tab"
+                        aria-selected={settingsTab === 'tokens'}
+                      >
+                        GitHub Tokens
+                      </button>
+                    </li>
+                    <li className="nav-item" role="presentation">
+                      <button
+                        type="button"
+                        className={`nav-link ${settingsTab === 'info' ? 'active' : ''}`}
+                        onClick={() => setSettingsTab('info')}
+                        role="tab"
+                        aria-selected={settingsTab === 'info'}
+                      >
+                        Info
+                      </button>
+                    </li>
+                  </ul>
+
+                  <div className="tab-content">
+                    <div className={`tab-pane fade ${settingsTab === 'general' ? 'show active' : ''}`} role="tabpanel">
+                      <h6>General settings</h6>
+                      <p className="text-muted">Configure startup behavior and UI preferences.</p>
+                      <div className="row gy-3">
+                        <div className="col-12 col-md-6">
+                          <div className="card p-3">
+                            <div className="form-check form-switch mb-3">
+                              <input
+                                className="form-check-input"
+                                type="checkbox"
+                                id="startRunnersOnStartup"
+                                checked={startRunnersOnStartup}
+                                onChange={async (event) => {
+                                  const nextValue = event.target.checked;
+                                  setStartRunnersOnStartup(nextValue);
+                                  await saveLoggingSettings({
+                                    uiLoggingEnabled,
+                                    runnerLoggingEnabled,
+                                    githubApiLoggingEnabled,
+                                    startRunnersOnStartup: nextValue
+                                  });
+                                }}
+                              />
+                              <label className="form-check-label" htmlFor="startRunnersOnStartup">
+                                Start runners on Docker startup
+                              </label>
+                            </div>
+                            <p className="mb-0 text-muted">Start runners when Docker Desktop starts-up. You will be able to disable this per runner.</p>
+                          </div>
+                        </div>
+                        <div className="col-12 col-md-6">
+                          <div className="card p-3">
+                            <h6 className="mb-2">UI Style</h6>
+                            <div className="form-check">
+                              <input
+                                className="form-check-input"
+                                type="radio"
+                                name="uiStyle"
+                                id="uiStyleLight"
+                                value="light"
+                                checked={uiStyle === 'light'}
+                                onChange={() => setUiStyle('light')}
+                              />
+                              <label className="form-check-label" htmlFor="uiStyleLight">Light</label>
+                            </div>
+                            <div className="form-check">
+                              <input
+                                className="form-check-input"
+                                type="radio"
+                                name="uiStyle"
+                                id="uiStyleDark"
+                                value="dark"
+                                checked={uiStyle === 'dark'}
+                                onChange={() => setUiStyle('dark')}
+                              />
+                              <label className="form-check-label" htmlFor="uiStyleDark">Dark</label>
+                            </div>
+                            <div className="form-check">
+                              <input
+                                className="form-check-input"
+                                type="radio"
+                                name="uiStyle"
+                                id="uiStyleSystem"
+                                value="system"
+                                checked={uiStyle === 'system'}
+                                onChange={() => setUiStyle('system')}
+                              />
+                              <label className="form-check-label" htmlFor="uiStyleSystem">System</label>
+                            </div>
+                            <p className="mb-0 text-muted">Choose your UI appearance preference.</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`tab-pane fade ${settingsTab === 'tools' ? 'show active' : ''}`} role="tabpanel">
+                      <h6>Tools</h6>
+                      <p className="text-muted">Manage runner host updates, persistent volume data, and logging.</p>
+                      <div className="mb-3">
+                        <button type="button" className="btn btn-warning me-2" onClick={refreshHostContainer}>
+                          Refresh Runner Host Container
+                        </button>
+                        <p className="mb-1 text-muted small">Refresh the Runner Host to apply any updates to the container.</p>
+                      </div>
+                      <div className="mb-3">
+                        <button
+                          type="button"
+                          className={`btn ${extensionInfo?.runnerVersionMismatch ? 'btn-primary' : 'btn-secondary'}`}
+                          disabled={!extensionInfo?.runnerVersionMismatch}
+                          onClick={updateRunners}
+                        >
+                          {extensionInfo?.runnerVersionMismatch ? 'Update Runners' : 'Up to Date'}
+                        </button>
+                        <p className="mb-1 text-muted small">
+                          {extensionInfo ? `Runner base version: ${extensionInfo.runnerBaseVersion || 'unknown'}` : 'Loading runner version info...'}
+                        </p>
+                        {extensionInfo ? (
+                          <p className="mb-0 text-muted small">
+                            {extensionInfo.runnerVersionMismatch ? `${extensionInfo.runnerVersionsOutOfDate} runner(s) need update.` : 'All runners up to date.'}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="mb-3">
+                        <button type="button" className="btn btn-danger me-2" onClick={() => clearVolume('gh-runner-manager-runners', 'Runners')}>
+                          Clear all data from Runners Volume
+                        </button>
+                        <p className="mb-1 text-muted small">WARNING: This will remove all runner data from the persistent volume.</p>
+                      </div>
+                      <div className="mb-3">
+                        <button type="button" className="btn btn-danger me-2" onClick={() => clearVolume('gh-runner-manager-data', 'Data')}>
+                          Clear all data from Data Volume
+                        </button>
+                        <p className="mb-1 text-muted small">WARNING: This will remove all extension data from the persistent volume.</p>
+                      </div>
+                      <div className="card p-3">
+                        <h6 className="mb-2">Logging</h6>
+                        <p className="mb-3 text-muted">All logs will be saved here.</p>
+                        <div className="form-check form-switch mb-2">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="uiLoggingEnabled"
+                            checked={uiLoggingEnabled}
+                            onChange={async (event) => {
+                              const nextValue = event.target.checked;
+                              setUiLoggingEnabled(nextValue);
+                              await saveLoggingSettings({
+                                uiLoggingEnabled: nextValue,
+                                runnerLoggingEnabled,
+                                githubApiLoggingEnabled,
+                                startRunnersOnStartup
+                              });
+                            }}
+                          />
+                          <label className="form-check-label" htmlFor="uiLoggingEnabled">Enable UI Logging</label>
+                        </div>
+                        <p className="mb-2 text-muted">Enable UI logging to help with trouble shooting.</p>
+                        <div className="form-check form-switch mb-2">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="runnerLoggingEnabled"
+                            checked={runnerLoggingEnabled}
+                            onChange={async (event) => {
+                              const nextValue = event.target.checked;
+                              setRunnerLoggingEnabled(nextValue);
+                              await saveLoggingSettings({
+                                uiLoggingEnabled,
+                                runnerLoggingEnabled: nextValue,
+                                githubApiLoggingEnabled,
+                                startRunnersOnStartup
+                              });
+                            }}
+                          />
+                          <label className="form-check-label" htmlFor="runnerLoggingEnabled">Enable Runner Logging</label>
+                        </div>
+                        <p className="mb-2 text-muted">Enable Runner logging for trouble shooting.</p>
+                        <div className="form-check form-switch">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="githubApiLoggingEnabled"
+                            checked={githubApiLoggingEnabled}
+                            onChange={async (event) => {
+                              const nextValue = event.target.checked;
+                              setGithubApiLoggingEnabled(nextValue);
+                              await saveLoggingSettings({
+                                uiLoggingEnabled,
+                                runnerLoggingEnabled,
+                                githubApiLoggingEnabled: nextValue,
+                                startRunnersOnStartup
+                              });
+                            }}
+                          />
+                          <label className="form-check-label" htmlFor="githubApiLoggingEnabled">Enable GitHub API Logging</label>
+                        </div>
+                        <p className="mb-0 text-muted">Enable GitHub API logging for trouble shooting.</p>
+                        <div className="mt-3">
+                          <button type="button" className="btn btn-outline-secondary btn-sm me-2" onClick={() => { setLogsOpen(!logsOpen); if (!logsOpen) { void loadLogs(); } }}>
+                            {logsOpen ? 'Hide logs' : 'View logs'}
+                          </button>
+                          <button type="button" className="btn btn-outline-danger btn-sm" onClick={clearLogs}>
+                            Clear logs
+                          </button>
+                        </div>
+                        {logsOpen ? (
+                          <div className="mt-3">
+                            <div className="card bg-dark text-white" style={{ minHeight: '200px', whiteSpace: 'pre-wrap', fontFamily: 'monospace', overflowY: 'auto', padding: '1rem' }}>
+                              {logsLoading ? 'Loading logs...' : logsContent || 'No logs available.'}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className={`tab-pane fade ${settingsTab === 'tokens' ? 'show active' : ''}`} role="tabpanel">
+                      <div className="mb-4">
+                        <h6>Saved GitHub API tokens</h6>
+                        {githubTokens.length === 0 ? (
+                          <div className="alert alert-info mb-0">No saved GitHub API tokens yet. Add one below to access repository lists in the runner form.</div>
+                        ) : (
+                          githubTokens.map((token) => (
+                            <div className="card mb-3" key={token.id}>
+                              <div className="card-body p-3">
+                                <div className="d-flex justify-content-between align-items-center gap-3">
+                                  <div>
+                                    <h6 className="mb-1">{token.name}</h6>
+                                    <p className="mb-0 text-muted">{token.login} · {token.type} · saved {new Date(token.createdAt).toLocaleDateString()}</p>
+                                  </div>
+                                  <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deleteGithubTokenById(token.id)}>
+                                    Delete
+                                  </button>
+                                </div>
                               </div>
-                              <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deleteGithubTokenById(token.id)}>
-                                Delete
-                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {!showTokenForm ? (
+                        <div>
+                          <button type="button" className="btn btn-primary" onClick={() => setShowTokenForm(true)}>
+                            Add new token
+                          </button>
+                        </div>
+                      ) : (
+                        <div>
+                          <h6>Add a new GitHub API token</h6>
+                          <div className="mb-3">
+                            <label className="form-label">Token name</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={tokenFormName}
+                              onChange={(event) => {
+                                setTokenFormName(event.target.value);
+                                setTokenFormError(null);
+                                setTokenActionMessage(null);
+                              }}
+                              placeholder="Friendly name for this token"
+                            />
+                            <div className="form-text">A friendly name to identify this token in the runner creation form.</div>
+                          </div>
+                          <div className="mb-3">
+                            <label className="form-label">Personal access token</label>
+                            <input
+                              type="password"
+                              className="form-control"
+                              value={tokenFormValue}
+                              onChange={(event) => {
+                                setTokenFormValue(event.target.value);
+                                setTokenFormError(null);
+                                setTokenActionMessage(null);
+                              }}
+                              placeholder="GitHub PAT"
+                            />
+                            <div className="form-text">GitHub personal access token used to enumerate repositories and validate access.</div>
+                          </div>
+                          {tokenFormError ? <div className="alert alert-danger">{tokenFormError}</div> : null}
+                          {tokenActionMessage ? <div className="alert alert-success">{tokenActionMessage}</div> : null}
+                          <div className="d-flex gap-2">
+                            <button type="button" className="btn btn-primary" onClick={createGithubToken} data-bs-toggle="tooltip" title="Save token">
+                              Save token
+                            </button>
+                            <button type="button" className="btn btn-secondary" onClick={() => {
+                              setShowTokenForm(false);
+                              setTokenFormName('');
+                              setTokenFormValue('');
+                              setTokenFormError(null);
+                              setTokenActionMessage(null);
+                            }}>
+                              Cancel
+                            </button>
+                          </div>
+                          <div className="mt-3 text-muted small">
+                            <p className="mb-1">Recommended permissions:</p>
+                            <p className="mb-0">• repo (full repository access for private repos)</p>
+                            <p className="mb-0">• read:org (if using organization-owned runners)</p>
+                            <p className="mb-0">• workflow (optional, for workflow-related access if needed)</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className={`tab-pane fade ${settingsTab === 'info' ? 'show active' : ''}`} role="tabpanel">
+                      <h6>Extension information</h6>
+                      <p className="text-muted">Core metadata and health status for the extension environment.</p>
+
+                      <div className="row gy-3">
+                        <div className="col-12 col-md-6">
+                          <div className="card p-3">
+                            <h6 className="mb-2">Extension details</h6>
+                            <p className="mb-1"><strong>Name:</strong> {extensionInfo?.extensionName || 'GH Runner'}</p>
+                            <p className="mb-1"><strong>Version:</strong> {extensionInfo?.extensionVersion || process.env.npm_package_version || '1.0.0'}</p>
+                            <p className="mb-1"><strong>Author:</strong> {extensionInfo?.extensionAuthor || 'MrTrilB'}</p>
+                            <p className="mb-0"><strong>Documentation:</strong>{' '}
+                              {extensionInfo?.documentationUrl ? (
+                                <a href={extensionInfo.documentationUrl} target="_blank" rel="noreferrer">View docs</a>
+                              ) : 'Not available'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="col-12 col-md-6">
+                          <div className="card p-3">
+                            <h5 className="mb-2">Health summary</h5>
+                            <div className="mb-4">
+                              <div className="d-flex align-items-center gap-2 mb-2">
+                                <h6 className="h6 mb-0">Github API</h6>
+                                <span className={`badge ${extensionInfo?.githubApiConnection.status === 'up' ? 'bg-success' : 'bg-danger'}`}>
+                                  {extensionInfo?.githubApiConnection.status === 'up' ? 'Up' : 'Down'}
+                                </span>
+                              </div>
+                              <p className="mb-0 text-muted">Checks that GitHub’s public API is reachable from the extension environment.</p>
+                            </div>
+                            <div className="mb-4">
+                              <div className="d-flex align-items-center gap-2 mb-2">
+                                <h6 className="h6 mb-0">Service Container</h6>
+                                <span className={`badge ${extensionInfo?.serviceContainer.status === 'up' ? 'bg-success' : 'bg-danger'}`}>
+                                  {extensionInfo?.serviceContainer.status === 'up' ? 'Up' : 'Down'}
+                                </span>
+                              </div>
+                              <p className="mb-0 text-muted">Verifies the Docker host container for the extension is running and available.</p>
+                            </div>
+                            <div className="mb-4">
+                              <div className="d-flex align-items-center gap-2 mb-2">
+                                <h6 className="h6 mb-0">GitHub Runners Container</h6>
+                                <span className={`badge ${extensionInfo?.runnerContainer.status === 'up' ? 'bg-success' : 'bg-danger'}`}>
+                                  {extensionInfo?.runnerContainer.status === 'up' ? 'Up' : 'Down'}
+                                </span>
+                              </div>
+                              <p className="mb-0 text-muted">Checks whether the GitHub Runners container is installed and ready.</p>
+                            </div>
+                            <div className="mb-4">
+                              <div className="d-flex align-items-center gap-2 mb-2">
+                                <h6 className="h6 mb-0">Data Volume</h6>
+                                <span className={`badge ${extensionInfo?.dataVolumeExists ? 'bg-success' : 'bg-danger'}`}>
+                                  {extensionInfo?.dataVolumeExists ? 'Up' : 'Down'}
+                                </span>
+                              </div>
+                              <p className="mb-0 text-muted">Confirms the extension data volume is present for persistent backend state.</p>
+                            </div>
+                            <div>
+                              <div className="d-flex align-items-center gap-2 mb-2">
+                                <h6 className="h6 mb-0">Runner Volume</h6>
+                                <span className={`badge ${extensionInfo?.runnerVolumeExists ? 'bg-success' : 'bg-danger'}`}>
+                                  {extensionInfo?.runnerVolumeExists ? 'Up' : 'Down'}
+                                </span>
+                              </div>
+                              <p className="mb-0 text-muted">Ensures the runner volume is available for storing GitHub Actions runner state.</p>
                             </div>
                           </div>
                         </div>
-                      ))
-                    )}
-                  </div>
-
-                  <div>
-                    <h6>Add a new GitHub API token</h6>
-                    <div className="mb-3">
-                      <label className="form-label">Token name</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={tokenFormName}
-                        onChange={(event) => {
-                          setTokenFormName(event.target.value);
-                          setTokenFormError(null);
-                          setTokenActionMessage(null);
-                        }}
-                        placeholder="Friendly name for this token"
-                      />
-                      <div className="form-text">A friendly name to identify this token in the runner creation form.</div>
-                    </div>
-                    <div className="mb-3">
-                      <label className="form-label">Personal access token</label>
-                      <input
-                        type="password"
-                        className="form-control"
-                        value={tokenFormValue}
-                        onChange={(event) => {
-                          setTokenFormValue(event.target.value);
-                          setTokenFormError(null);
-                          setTokenActionMessage(null);
-                        }}
-                        placeholder="GitHub PAT"
-                      />
-                      <div className="form-text">GitHub personal access token used to enumerate repositories and validate access.</div>
-                    </div>
-                    {tokenFormError ? <div className="alert alert-danger">{tokenFormError}</div> : null}
-                    {tokenActionMessage ? <div className="alert alert-success">{tokenActionMessage}</div> : null}
-                    <button type="button" className="btn btn-primary" onClick={createGithubToken} data-bs-toggle="tooltip" title="Save token">
-                      Save token
-                    </button>
-                    <div className="mt-3 text-muted small">
-                      <p className="mb-1">Recommended permissions:</p>
-                      <p className="mb-0">• repo (full repository access for private repos)</p>
-                      <p className="mb-0">• read:org (if using organization-owned runners)</p>
-                      <p className="mb-0">• workflow (optional, for workflow-related access if needed)</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -876,9 +1676,8 @@ export function App() {
                       <div>
                         <strong>{runner.runnerName}</strong>
                         <div className="text-muted small">
-                          {runner.owner}/{runner.repo || '(org)'} · {runner.labels.length > 0 ? runner.labels.join(', ') : 'no labels'}
+                          {runner.owner}/{runner.repo || '(org)'}
                         </div>
-                        <div className="text-muted small">{runner.hostContainerName} · {runner.runnerPath}</div>
                       </div>
                       <span className={`badge justify-content-end ${runner.status === 'on' ? 'bg-success' : 'bg-danger'}`}>
                         {runner.status === 'on' ? 'Running' : 'Stopped'}
@@ -894,8 +1693,31 @@ export function App() {
                 data-bs-parent="#runnerAccordion"
               >
                 <div className="accordion-body">
-                  <div className="row">
-                    <div className="col align-right d-flex justify-content-end">
+                  <div className="row align-items-center mb-3">
+                    <div className="col-12 col-md-6 d-flex align-items-center">
+                      <div className="form-check form-switch mb-0">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          disabled={!startRunnersOnStartup}
+                          id={`startOnStartup-${runner.id}`}
+                          checked={Boolean(runner.startOnStartup)}
+                          onChange={async (event) => {
+                            const nextValue = event.target.checked;
+                            try {
+                              await service?.put(`/api/runners/${encodeURIComponent(runner.id)}`, { startOnStartup: nextValue });
+                              setRunners((prev) => prev.map((item) => item.id === runner.id ? { ...item, startOnStartup: nextValue } : item));
+                            } catch (err) {
+                              handleError(err);
+                            }
+                          }}
+                        />
+                        <label className="form-check-label small mb-0" htmlFor={`startOnStartup-${runner.id}`}>
+                          Start on startup
+                        </label>
+                      </div>
+                    </div>
+                    <div className="col-12 col-md-6 d-flex justify-content-md-end mt-3 mt-md-0">
                       <div className="btn-group btn-group-sm" style={{ paddingRight: '10px' }}>
                         <button type="button" className="btn btn-primary" disabled={runner.status === 'on'} onClick={() => runAction(runner.id, 'start')} data-bs-toggle="tooltip" title="Start">
                           <FontAwesomeIcon icon={faPlay} fixedWidth />
@@ -917,14 +1739,13 @@ export function App() {
                   </div>
                   <div className="row gy-3 mt-2">
                     <div className="col-12 col-md-6">
-                      <p className="mb-1"><strong>GitHub URL:</strong> {runner.githubUrl}</p>
-                      <p className="mb-1"><strong>Owner:</strong> {runner.owner}</p>
-                      <p className="mb-0"><strong>Repo:</strong> {runner.repo || '(org)'}</p>
+                      <p className="mb-0"><strong></strong></p>
+                      <p className="mb-1"><strong>Created:</strong> {new Date(runner.createdAt).toLocaleString()}</p>
+                      <p className="mb-1"><strong>Runner path:</strong> {runner.runnerPath}</p>
+                      <p className="mb-0"><strong>Runner Version:</strong> {runner.runnerVersion || 'unknown'}</p>
+                      <p className="mb-1"><strong>Labels:</strong> {runner.labels.join(', ')}</p>
                     </div>
                     <div className="col-12 col-md-6">
-                      <p className="mb-1"><strong>Labels:</strong> {runner.labels.join(', ')}</p>
-                      <p className="mb-1"><strong>Created:</strong> {new Date(runner.createdAt).toLocaleString()}</p>
-                      <p className="mb-0"><strong>Raw status:</strong> {runner.dockerRawStatus || 'unknown'}</p>
                     </div>
                   </div>
                 </div>
@@ -1002,38 +1823,81 @@ export function App() {
                   </div>
 
                   {!editing ? (
-                    <div className="row gx-2 gy-3 align-items-end mb-3">
-                      <div className="col-12 col-md-9">
-                        <label className="form-label">Repository</label>
+                    <div className="mb-3 position-relative">
+                      <label className="form-label">Repository</label>
+                      <div className="input-group">
                         <input
                           type="text"
                           className="form-control"
-                          list="reposList"
                           value={formState.repo}
-                          onChange={(event) => setFormState({ ...formState, repo: event.target.value })}
                           disabled={!formState.selectedTokenId}
                           placeholder="Pick or type a repository"
+                          autoComplete="off"
+                          onChange={(event) => {
+                            setFormState({ ...formState, repo: event.target.value });
+                            setSelectedRepoOption(null);
+                            if (repoOptions.length > 0) {
+                              setRepoDropdownOpen(true);
+                            }
+                          }}
+                          onFocus={() => {
+                            if (repoOptions.length > 0) {
+                              setRepoDropdownOpen(true);
+                            }
+                          }}
+                          onBlur={() => {
+                            setTimeout(() => setRepoDropdownOpen(false), 150);
+                          }}
                         />
-                        <datalist id="reposList">
-                          {repoOptions.map((repo) => (
-                            <option key={repo.id} value={repo.full_name} />
-                          ))}
-                        </datalist>
-                        <div className="form-text">Pick a repository from the selected token. Leave blank for an organization-level runner.</div>
-                      </div>
-                      <div className="col-12 col-md-3">
                         <button
                           type="button"
-                          className="btn btn-outline-secondary w-100"
+                          className="btn btn-outline-secondary"
                           disabled={!formState.selectedTokenId || repoLoading}
                           onClick={() => {
                             if (formState.selectedTokenId) {
                               void loadReposForToken(formState.selectedTokenId);
+                              setRepoDropdownOpen(true);
                             }
                           }}
                         >
                           {repoLoading ? 'Refreshing…' : 'Refresh repos'}
                         </button>
+                      </div>
+                      {repoDropdownOpen && repoOptions.length > 0 && (
+                        <div className="dropdown-menu show w-100 mt-1 shadow" style={{ maxHeight: '240px', overflowY: 'auto' }}>
+                          {repoOptions
+                            .filter((repo) =>
+                              repo.full_name.toLowerCase().includes(formState.repo.toLowerCase())
+                            )
+                            .slice(0, 20)
+                            .map((repo) => (
+                              <button
+                                key={repo.id}
+                                type="button"
+                                className="dropdown-item text-truncate"
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  setFormState((prev) => ({
+                                    ...prev,
+                                    repo: repo.name,
+                                    owner: repo.owner
+                                  }));
+                                  setSelectedRepoOption(repo);
+                                  setRepoDropdownOpen(false);
+                                }}
+                              >
+                                {repo.full_name}
+                              </button>
+                            ))}
+                          {repoOptions.filter((repo) =>
+                            repo.full_name.toLowerCase().includes(formState.repo.toLowerCase())
+                          ).length === 0 && (
+                            <span className="dropdown-item text-muted">No matching repositories</span>
+                          )}
+                        </div>
+                      )}
+                      <div className="form-text">
+                        Search repositories for the selected owner using GitHub. Leave blank for an organization-level runner.
                       </div>
                     </div>
                   ) : (
@@ -1077,13 +1941,11 @@ export function App() {
                       type="text"
                       className="form-control"
                       value={formState.labels.join(', ')}
-                      onChange={(event) => setFormState({
-                        ...formState,
-                        labels: event.target.value.split(',').map((label) => label.trim()).filter(Boolean)
-                      })}
-                      placeholder="e.g. self-hosted,docker,linux"
+                      onChange={(event) => setFormState({ ...formState, labels: event.target.value.split(',').map((label) => label.trim()).filter(Boolean) })}
+                      placeholder="Pick or type labels"
+                      autoComplete="off"
                     />
-                    <div className="form-text">Comma-separated labels used by GitHub workflows to target this runner.</div>
+                    <div className="form-text">Select one or more labels used by GitHub workflows to target this runner.</div>
                   </div>
                 </div>
                 <div className="modal-footer">

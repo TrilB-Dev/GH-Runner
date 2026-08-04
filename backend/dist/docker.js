@@ -1,15 +1,19 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runDocker = runDocker;
+exports.getExtensionVersion = getExtensionVersion;
 exports.containerExists = containerExists;
-exports.volumeExists = volumeExists;
+exports.getVolumeExists = getVolumeExists;
 exports.ensureVolumeExists = ensureVolumeExists;
+exports.removeVolume = removeVolume;
 exports.getContainerStatus = getContainerStatus;
 exports.startContainer = startContainer;
 exports.ensureRunnerHostContainer = ensureRunnerHostContainer;
+exports.getHostRunnerBaseVersion = getHostRunnerBaseVersion;
 exports.getRunnerHostHealth = getRunnerHostHealth;
 exports.dockerExec = dockerExec;
 exports.getHostRunnerStatus = getHostRunnerStatus;
+exports.getRunnerVersion = getRunnerVersion;
 exports.createRunnerInHostContainer = createRunnerInHostContainer;
 exports.startHostRunner = startHostRunner;
 exports.stopHostRunner = stopHostRunner;
@@ -50,7 +54,7 @@ async function containerExists(containerName) {
     const raw = await runDocker(['ps', '-a', '--filter', `name=^/${containerName}$`, '--format', '{{.Names}}']);
     return raw.trim() === containerName;
 }
-async function volumeExists(volumeName) {
+async function getVolumeExists(volumeName) {
     try {
         const raw = await runDocker(['volume', 'inspect', volumeName]);
         return Boolean(raw);
@@ -60,9 +64,12 @@ async function volumeExists(volumeName) {
     }
 }
 async function ensureVolumeExists(volumeName) {
-    if (!(await volumeExists(volumeName))) {
+    if (!(await getVolumeExists(volumeName))) {
         await runDocker(['volume', 'create', volumeName]);
     }
+}
+async function removeVolume(volumeName) {
+    await runDocker(['volume', 'rm', '-f', volumeName]);
 }
 async function getPersistedExtensionVersion(_containerName) {
     try {
@@ -252,10 +259,10 @@ async function ensureHostRunnerBase(hostContainer) {
 async function getRunnerHostHealth(containerName) {
     const exists = await containerExists(containerName);
     const status = exists ? await getContainerStatus(containerName) : { status: 'off', raw: '' };
-    const runnerInstalled = exists
-        ? Boolean((await dockerExec(containerName, ['sh', '-c', 'test -f /opt/github/runner/config.sh && echo OK || true'])).trim())
+    const hostBootstrapReady = exists
+        ? Boolean((await dockerExec(containerName, ['sh', '-c', 'test -f /opt/github/base/config.sh && echo OK || true'])).trim())
         : false;
-    return { exists, status, runnerInstalled };
+    return { exists, status, runnerInstalled: hostBootstrapReady };
 }
 async function dockerExec(containerName, args) {
     return await runDocker(['exec', containerName, ...args]);
@@ -301,6 +308,15 @@ async function getHostRunnerStatus(hostContainer, runnerPath) {
         return { status: 'off', raw: '' };
     }
 }
+async function getRunnerVersion(hostContainer, runnerPath) {
+    try {
+        const raw = await dockerExec(hostContainer, ['sh', '-c', `cat '${runnerPath}/.actions-runner-version' 2>/dev/null || cat '${RUNNER_BASE_VERSION_FILE}' 2>/dev/null || true`]);
+        return raw.trim();
+    }
+    catch {
+        return '';
+    }
+}
 async function createRunnerInHostContainer(hostContainer, runnerPath, githubUrl, owner, repo, isOrg, token, runnerName, labels, runnerGroup) {
     const repoUrl = isOrg
         ? `${githubUrl.replace(/\/$/, '')}/orgs/${owner}`
@@ -312,10 +328,11 @@ async function createRunnerInHostContainer(hostContainer, runnerPath, githubUrl,
         `mkdir -p '${runnerPath}'`,
         `mkdir -p '${workDir}'`,
         `cp -a /opt/github/base/. '${runnerPath}/'`,
+        `cp /opt/github/base/.actions-runner-version '${runnerPath}/.actions-runner-version' 2>/dev/null || true`,
         `chown -R ${HOST_RUNNER_USER}:${HOST_RUNNER_USER} '${runnerPath}'`,
         `mkdir -p '${workDir}'`,
         `chown -R ${HOST_RUNNER_USER}:${HOST_RUNNER_USER} '${workDir}'`,
-        `su ${HOST_RUNNER_USER} -s /bin/sh -c 'cd "${runnerPath}" && ./config.sh --url "${repoUrl}" --token "${token}" --name "${runnerName}" --workdir "${workDir}" --labels "${labelSet}" --unattended --replace${groupArg}'`
+        `su ${HOST_RUNNER_USER} -s /bin/sh -c 'cd "${runnerPath}" && ./config.sh --url "${repoUrl}" --token "${token}" --name "${runnerName}" --work "${workDir}" --labels "${labelSet}" --unattended --replace${groupArg}'`
     ].join(' && ');
     await dockerExec(hostContainer, ['sh', '-c', setupCommand]);
 }

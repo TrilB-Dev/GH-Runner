@@ -11,6 +11,7 @@ export interface RunnerConfig {
   tokenName?: string;
   runnerGroup?: string;
   labels: string[];
+  startOnStartup: boolean;
   hostContainerName: string;
   runnerRootPath: string;
   runnerPath: string;
