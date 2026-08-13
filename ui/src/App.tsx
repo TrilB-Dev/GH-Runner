@@ -424,6 +424,38 @@ export function App() {
     [githubTokens, formState.selectedTokenId]
   );
 
+  const owners = useMemo(() => {
+    const ownerSet = new Set<string>();
+    if (selectedToken?.login) {
+      ownerSet.add(selectedToken.login);
+    }
+    repoOptions.forEach((repo) => ownerSet.add(repo.owner));
+    return Array.from(ownerSet);
+  }, [selectedToken, repoOptions]);
+
+  const formEnabled = editing || Boolean(formState.selectedTokenId);
+
+  const refreshSelectPickers = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    document.querySelectorAll<HTMLSelectElement>('select.selectpicker').forEach((element) => {
+      try {
+        const selectpicker = (window as any).Selectpicker;
+        if (selectpicker && typeof selectpicker.getOrCreateInstance === 'function') {
+          selectpicker.getOrCreateInstance(element).refresh();
+        }
+      } catch {
+        // ignore refresh errors for now
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    refreshSelectPickers();
+  }, [refreshSelectPickers, githubTokens, owners, repoOptions, runnerGroups, formState.labels, formState.owner, formState.repo, formState.runnerGroup, formEnabled]);
+
   const loadGithubTokensList = useCallback(async () => {
     if (!service) {
       return;
@@ -732,6 +764,26 @@ export function App() {
   }, [loadRunners, loadGithubTokensList]);
 
   useEffect(() => {
+    const refreshRunners = () => {
+      if (document.visibilityState === 'visible') {
+        void loadRunners();
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      document.addEventListener('visibilitychange', refreshRunners);
+      window.addEventListener('focus', refreshRunners);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        document.removeEventListener('visibilitychange', refreshRunners);
+        window.removeEventListener('focus', refreshRunners);
+      }
+    };
+  }, [loadRunners]);
+
+  useEffect(() => {
     if (settingsOpen) {
       void loadGithubTokensList();
       void loadExtensionInfo();
@@ -829,6 +881,15 @@ export function App() {
     setEditing(null);
     setFormState(defaultFormState);
   };
+
+  useEffect(() => {
+    if (!editing && selectedToken && !formState.runnerName && formState.repo) {
+      setFormState((prev) => ({
+        ...prev,
+        runnerName: prev.runnerName || prev.repo
+      }));
+    }
+  }, [editing, selectedToken, formState.repo, formState.runnerName]);
 
   const saveRunner = async () => {
     if (saving) {
@@ -1120,6 +1181,17 @@ export function App() {
         </div>
       ) : null}
       {backendMessage && !error ? <div className="alert alert-info">{backendMessage}</div> : null}
+      {loading && !runners.length ? (
+        <div className="alert alert-info d-flex align-items-center" role="status">
+          <div className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
+          <div>Loading runners, please wait...</div>
+        </div>
+      ) : loading ? (
+        <div className="alert alert-info d-flex align-items-center" role="status">
+          <div className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
+          <div>Refreshing runner status...</div>
+        </div>
+      ) : null}
       {logsOpen ? (
         <div className="card mb-3">
           <div className="card-header d-flex justify-content-between align-items-center">
@@ -1765,23 +1837,13 @@ export function App() {
                   <button type="button" className="btn-close" aria-label="Close" onClick={closeDialog} />
                 </div>
                 <div className="modal-body py-4">
-                  <div className="mb-3">
-                    <label className="form-label">Runner name</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={formState.runnerName}
-                      onChange={(event) => setFormState({ ...formState, runnerName: event.target.value })}
-                      placeholder="Runner name"
-                    />
-                    <div className="form-text">A local identifier for this runner. It becomes the runner directory name inside the host container.</div>
-                  </div>
-
                   {!editing && (
                     <div className="mb-3">
-                      <label className="form-label">GitHub API token</label>
+                      <label className="form-label" htmlFor="GithubAPITokenSelect">GitHub API token</label>
                       <select
-                        className="form-select"
+                        className="selectpicker show-tick"
+                        data-live-search="true"
+                        id="GithubAPITokenSelect"
                         value={formState.selectedTokenId}
                         onChange={(event) => {
                           const token = githubTokens.find((item) => item.id === event.target.value) || null;
@@ -1802,19 +1864,24 @@ export function App() {
                       <div className="form-text">Select a saved token to load repositories and derive the owner.</div>
                     </div>
                   )}
-
                   <div className="mb-3">
-                    <label className="form-label">Owner / organization</label>
-                    <input
-                      type="text"
-                      className="form-control"
+                    <label className="form-label" htmlFor="runnerOwner">Owner / organization</label>
+                    <select
+                      className="selectpicker show-tick"
+                      data-live-search="true"
+                      id="runnerOwner"
                       value={formState.owner}
                       onChange={(event) => {
-                        setFormState({ ...formState, owner: event.target.value });
+                        setFormState({ ...formState, owner: event.target.value, repo: '' });
                         setSelectedRepoOption(null);
                       }}
-                      disabled={Boolean(editing)}
-                    />
+                      disabled={!formEnabled}
+                    >
+                      <option value="">Select an owner</option>
+                      {owners.map((owner) => (
+                        <option key={owner} value={owner}>{owner}</option>
+                      ))}
+                    </select>
                     <div className="form-text">
                       {editing
                         ? 'Owner set for this runner and cannot be changed from this edit view.'
@@ -1822,129 +1889,119 @@ export function App() {
                     </div>
                   </div>
 
-                  {!editing ? (
-                    <div className="mb-3 position-relative">
-                      <label className="form-label">Repository</label>
-                      <div className="input-group">
-                        <input
-                          type="text"
-                          className="form-control"
-                          value={formState.repo}
-                          disabled={!formState.selectedTokenId}
-                          placeholder="Pick or type a repository"
-                          autoComplete="off"
-                          onChange={(event) => {
-                            setFormState({ ...formState, repo: event.target.value });
-                            setSelectedRepoOption(null);
-                            if (repoOptions.length > 0) {
-                              setRepoDropdownOpen(true);
-                            }
-                          }}
-                          onFocus={() => {
-                            if (repoOptions.length > 0) {
-                              setRepoDropdownOpen(true);
-                            }
-                          }}
-                          onBlur={() => {
-                            setTimeout(() => setRepoDropdownOpen(false), 150);
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-outline-secondary"
-                          disabled={!formState.selectedTokenId || repoLoading}
-                          onClick={() => {
-                            if (formState.selectedTokenId) {
-                              void loadReposForToken(formState.selectedTokenId);
-                              setRepoDropdownOpen(true);
-                            }
-                          }}
-                        >
-                          {repoLoading ? 'Refreshing…' : 'Refresh repos'}
-                        </button>
-                      </div>
-                      {repoDropdownOpen && repoOptions.length > 0 && (
-                        <div className="dropdown-menu show w-100 mt-1 shadow" style={{ maxHeight: '240px', overflowY: 'auto' }}>
-                          {repoOptions
-                            .filter((repo) =>
-                              repo.full_name.toLowerCase().includes(formState.repo.toLowerCase())
-                            )
-                            .slice(0, 20)
-                            .map((repo) => (
-                              <button
-                                key={repo.id}
-                                type="button"
-                                className="dropdown-item text-truncate"
-                                onMouseDown={(event) => {
-                                  event.preventDefault();
-                                  setFormState((prev) => ({
-                                    ...prev,
-                                    repo: repo.name,
-                                    owner: repo.owner
-                                  }));
-                                  setSelectedRepoOption(repo);
-                                  setRepoDropdownOpen(false);
-                                }}
-                              >
-                                {repo.full_name}
-                              </button>
-                            ))}
-                          {repoOptions.filter((repo) =>
-                            repo.full_name.toLowerCase().includes(formState.repo.toLowerCase())
-                          ).length === 0 && (
-                            <span className="dropdown-item text-muted">No matching repositories</span>
-                          )}
-                        </div>
-                      )}
-                      <div className="form-text">
-                        Search repositories for the selected owner using GitHub. Leave blank for an organization-level runner.
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mb-3">
-                      <label className="form-label">Repository name</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={formState.repo}
-                        onChange={(event) => setFormState({ ...formState, repo: event.target.value })}
-                        placeholder="Repository name"
-                      />
-                      <div className="form-text">Target repository name. Leave blank for an organization-level runner.</div>
-                    </div>
-                  )}
-
-                  {!editing && (
-                    <div className="mb-3">
-                      <label className="form-label">Runner group</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        list="runnerGroupsList"
-                        value={formState.runnerGroup || ''}
-                        onChange={(event) => setFormState({ ...formState, runnerGroup: event.target.value })}
-                        disabled={runnerGroups.length === 0}
-                        placeholder="Select or type a runner group"
-                      />
-                      <datalist id="runnerGroupsList">
-                        {runnerGroups.map((group) => (
-                          <option key={group.id} value={group.name} />
-                        ))}
-                      </datalist>
-                      <div className="form-text">Optional runner group for organization or repo runners.</div>
-                    </div>
-                  )}
+                  <div className="mb-3">
+                    <label className="form-label" htmlFor="repoSelect">Repository</label>
+                    <select
+                      id="repoSelect"
+                      className="selectpicker show-tick"
+                      data-live-search="true"
+                      data-live-search-placeholder="Search repositories"
+                      title="Select a repository"
+                      disabled={!formEnabled || repoOptions.length === 0}
+                      value={selectedRepoOption ? `${selectedRepoOption.owner}/${selectedRepoOption.name}` : formState.repo ? `${formState.owner}/${formState.repo}` : ''}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (!value) {
+                          setFormState((prev) => ({
+                            ...prev,
+                            repo: '',
+                            runnerGroup: undefined
+                          }));
+                          setSelectedRepoOption(null);
+                          return;
+                        }
+                        const [owner, repoName] = value.split('/');
+                        const repo = repoOptions.find((item) => item.owner === owner && item.name === repoName) ?? null;
+                        setFormState((prev) => ({
+                          ...prev,
+                          owner,
+                          repo: repoName,
+                          runnerGroup: prev.runnerGroup,
+                          runnerName: (!prev.runnerName || prev.runnerName === prev.repo) ? repoName : prev.runnerName
+                        }));
+                        setSelectedRepoOption(repo);
+                      }}
+                    >
+                      <option value="">Organization-level runner</option>
+                      {repoOptions.map((repo) => (
+                        <option key={repo.id} value={`${repo.owner}/${repo.name}`}>
+                          {repo.full_name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="form-text">Search repositories for the selected owner using GitHub. Leave blank for an organization-level runner.</div>
+                  </div>
 
                   <div className="mb-3">
-                    <label className="form-label">Runner labels</label>
+                    <label className="form-label" htmlFor="runnerGroupSelect">Runner group</label>
+                    <select
+                      id="runnerGroupSelect"
+                      className="selectpicker show-tick"
+                      data-live-search="true"
+                      disabled={!formEnabled || runnerGroups.length === 0}
+                      value={formState.runnerGroup || ''}
+                      onChange={(event) => setFormState({ ...formState, runnerGroup: event.target.value })}
+                    >
+                      <option value="">No runner group</option>
+                      {runnerGroups.map((group) => (
+                        <option key={group.id} value={group.name}>
+                          {group.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="form-text">Optional runner group for organization or repository runners.</div>
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="form-label">Runner name</label>
                     <input
                       type="text"
                       className="form-control"
-                      value={formState.labels.join(', ')}
-                      onChange={(event) => setFormState({ ...formState, labels: event.target.value.split(',').map((label) => label.trim()).filter(Boolean) })}
-                      placeholder="Pick or type labels"
-                      autoComplete="off"
+                      value={formState.runnerName}
+                      disabled={!formEnabled}
+                      onChange={(event) => setFormState({ ...formState, runnerName: event.target.value })}
+                      placeholder="Runner name"
                     />
+                    <div className="form-text">A local identifier for this runner. It becomes the runner directory name inside the host container.</div>
+                  </div>
+
+                  <div className="mb-3 form-check form-switch">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      id="runnerStartOnStartup"
+                      checked={Boolean(formState.startOnStartup)}
+                      onChange={(event) => setFormState({ ...formState, startOnStartup: event.target.checked })}
+                    />
+                    <label className="form-check-label" htmlFor="runnerStartOnStartup">
+                      Start this runner on Docker startup
+                    </label>
+                    <div className="form-text">If enabled, this runner will be started automatically when the Docker backend starts and the global startup setting is enabled.</div>
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="form-label">Runner labels</label>
+                    <select
+                      className="selectpicker show-tick"
+                      multiple
+                      data-live-search="true"
+                      data-show-selected-tags="true"
+                      data-open-options="true"
+                      data-live-search-placeholder="Search or create tags"
+                      title="Search or create tags"
+                      disabled={!formEnabled}
+                      value={formState.labels}
+                      onChange={(event) => {
+                        const selected = Array.from(event.target.selectedOptions).map((option) => option.value);
+                        setFormState({ ...formState, labels: selected });
+                      }}
+                    >
+                      {labelOptions.map((label) => (
+                        <option key={label} value={label}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
                     <div className="form-text">Select one or more labels used by GitHub workflows to target this runner.</div>
                   </div>
                 </div>

@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@crestapps/bootstrap-select": "^1.2.4",
     "@docker/extension-api-client": "0.4.2",
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.5.0",
     "bootstrap": "^5.3.8",
-    "bootstrap-search": "github:gumbarros/BootstrapSearch",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
