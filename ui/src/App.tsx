@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Tooltip from 'bootstrap/js/dist/tooltip';
 import { createDockerDesktopClient } from '@docker/extension-api-client';
+import Selectpicker from '@crestapps/bootstrap-select';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faGear,
@@ -436,15 +437,18 @@ export function App() {
   const formEnabled = editing || Boolean(formState.selectedTokenId);
 
   const refreshSelectPickers = useCallback(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || !Selectpicker) {
       return;
     }
 
     document.querySelectorAll<HTMLSelectElement>('select.selectpicker').forEach((element) => {
       try {
-        const selectpicker = (window as any).Selectpicker;
-        if (selectpicker && typeof selectpicker.getOrCreateInstance === 'function') {
-          selectpicker.getOrCreateInstance(element).refresh();
+        const instance = (Selectpicker as any).getOrCreateInstance
+          ? (Selectpicker as any).getOrCreateInstance(element)
+          : new (Selectpicker as any)(element);
+
+        if (instance && typeof instance.refresh === 'function') {
+          instance.refresh();
         }
       } catch {
         // ignore refresh errors for now
@@ -454,7 +458,20 @@ export function App() {
 
   useEffect(() => {
     refreshSelectPickers();
-  }, [refreshSelectPickers, githubTokens, owners, repoOptions, runnerGroups, formState.labels, formState.owner, formState.repo, formState.runnerGroup, formEnabled]);
+  }, [
+    refreshSelectPickers,
+    githubTokens,
+    owners,
+    repoOptions,
+    runnerGroups,
+    formState.labels,
+    formState.owner,
+    formState.repo,
+    formState.runnerGroup,
+    formEnabled,
+    showDialog,
+    editing
+  ]);
 
   const loadGithubTokensList = useCallback(async () => {
     if (!service) {

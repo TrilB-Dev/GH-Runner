@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import "@crestapps/bootstrap-select/dist/css/bootstrap-select.min.css";
-import "@crestapps/bootstrap-select/dist/js/bootstrap-select.min.js";
 
 import { App } from './App';
 
