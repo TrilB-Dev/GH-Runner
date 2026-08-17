@@ -5,7 +5,7 @@ exports.getExtensionVersion = getExtensionVersion;
 exports.containerExists = containerExists;
 exports.getVolumeExists = getVolumeExists;
 exports.ensureVolumeExists = ensureVolumeExists;
-exports.removeVolume = removeVolume;
+exports.clearVolumeContents = clearVolumeContents;
 exports.getContainerStatus = getContainerStatus;
 exports.startContainer = startContainer;
 exports.ensureRunnerHostContainer = ensureRunnerHostContainer;
@@ -39,6 +39,10 @@ async function runDocker(args) {
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
+function quoteNestedShellArgument(value) {
+    const escapedValue = value.replace(/'/g, `'"'"'`);
+    return `'"'"'${escapedValue}'"'"'`;
+}
 function getExtensionVersion() {
     try {
         const metadataPath = (0, path_1.join)(__dirname, '..', '..', 'metadata.json');
@@ -68,8 +72,17 @@ async function ensureVolumeExists(volumeName) {
         await runDocker(['volume', 'create', volumeName]);
     }
 }
-async function removeVolume(volumeName) {
-    await runDocker(['volume', 'rm', '-f', volumeName]);
+async function clearVolumeContents(volumeName) {
+    await runDocker([
+        'run',
+        '--rm',
+        '-v',
+        `${volumeName}:/volume`,
+        'debian:bookworm-slim',
+        'sh',
+        '-c',
+        'find /volume -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'
+    ]);
 }
 async function getPersistedExtensionVersion(_containerName) {
     try {
@@ -319,11 +332,11 @@ async function getRunnerVersion(hostContainer, runnerPath) {
 }
 async function createRunnerInHostContainer(hostContainer, runnerPath, githubUrl, owner, repo, isOrg, token, runnerName, labels, runnerGroup) {
     const repoUrl = isOrg
-        ? `${githubUrl.replace(/\/$/, '')}/orgs/${owner}`
+        ? `${githubUrl.replace(/\/$/, '')}/${owner}`
         : `${githubUrl.replace(/\/$/, '')}/${owner}/${repo}`;
     const workDir = `${runnerPath}/work`;
     const labelSet = labels.join(',');
-    const groupArg = runnerGroup ? ` --runnergroup '${runnerGroup}'` : '';
+    const groupArg = runnerGroup ? ` --runnergroup ${quoteNestedShellArgument(runnerGroup)}` : '';
     const setupCommand = [
         `mkdir -p '${runnerPath}'`,
         `mkdir -p '${workDir}'`,
@@ -363,8 +376,18 @@ async function restartHostRunner(hostContainer, runnerPath) {
     await startHostRunner(hostContainer, runnerPath);
 }
 async function removeHostRunner(hostContainer, runnerPath) {
-    await stopHostRunner(hostContainer, runnerPath);
-    await dockerExec(hostContainer, ['sh', '-c', `rm -rf '${runnerPath}' || true`]);
+    try {
+        await stopHostRunner(hostContainer, runnerPath);
+    }
+    catch (error) {
+        console.warn(`Failed to stop runner at ${runnerPath} before cleanup:`, error);
+    }
+    const escapedRunnerPath = runnerPath.replace(/'/g, "'\\''");
+    await dockerExec(hostContainer, ['sh', '-c', `rm -rf -- '${escapedRunnerPath}'`]);
+    const remaining = await dockerExec(hostContainer, ['sh', '-c', `test ! -e '${escapedRunnerPath}' && echo removed || echo present`]);
+    if (remaining.trim() !== 'removed') {
+        throw new Error(`Runner directory was not removed: ${runnerPath}`);
+    }
 }
 async function refreshRunnerHostContainer(containerName) {
     if (await containerExists(containerName)) {

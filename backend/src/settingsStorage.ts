@@ -6,6 +6,7 @@ export interface LoggingSettings {
   runnerLoggingEnabled: boolean;
   githubApiLoggingEnabled: boolean;
   startRunnersOnStartup: boolean;
+  language: string;
 }
 
 const settingsDir = join(__dirname, 'data');
@@ -15,7 +16,8 @@ const defaultSettings: LoggingSettings = {
   uiLoggingEnabled: false,
   runnerLoggingEnabled: false,
   githubApiLoggingEnabled: false,
-  startRunnersOnStartup: false
+  startRunnersOnStartup: false,
+  language: 'en_GB'
 };
 
 export async function loadSettings(): Promise<LoggingSettings> {
@@ -27,7 +29,8 @@ export async function loadSettings(): Promise<LoggingSettings> {
       uiLoggingEnabled: parsed.uiLoggingEnabled ?? defaultSettings.uiLoggingEnabled,
       runnerLoggingEnabled: parsed.runnerLoggingEnabled ?? defaultSettings.runnerLoggingEnabled,
       githubApiLoggingEnabled: parsed.githubApiLoggingEnabled ?? defaultSettings.githubApiLoggingEnabled,
-      startRunnersOnStartup: parsed.startRunnersOnStartup ?? defaultSettings.startRunnersOnStartup
+      startRunnersOnStartup: parsed.startRunnersOnStartup ?? defaultSettings.startRunnersOnStartup,
+      language: parsed.language ?? defaultSettings.language
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {

@@ -1,0 +1,70 @@
+.collapse-chevron {
+  display: inline-grid;
+  width: 1rem;
+  height: 1rem;
+  place-items: center;
+  margin-left: auto;
+}
+
+.runner-hierarchy-section {
+  /* border: 0.5px solid var(--bs-border-color); */
+  border-radius: 0.5rem;
+}
+
+.runner-hierarchy-token-section,
+.runner-hierarchy-owner-section,
+.runner-hierarchy-group-section {
+  margin-bottom: 0.75rem;
+}
+
+.runner-hierarchy-content {
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+.runner-hierarchy-runners {
+  margin-left: 0.5rem;
+  margin-bottom: 0.25rem;
+  margin-right: 0.25rem;
+}
+
+.runner-hierarchy-runners .accordion-collapse {
+  padding-left: 0.5rem;
+}
+
+.runner-hierarchy-owner {
+  padding-left: 0.5rem;
+}
+
+.runner-hierarchy-group {
+  padding-left: 0.5rem;
+}
+
+.runner-hierarchy-ungrouped {
+  border: 0;
+  margin-bottom: 0;
+}
+
+.collapse-chevron svg {
+  grid-area: 1 / 1;
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.collapse-chevron .chevron-up {
+  opacity: 0;
+  transform: translateY(0.2rem);
+}
+
+.collapse-chevron .chevron-down {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+[aria-expanded="true"] .collapse-chevron .chevron-up {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+[aria-expanded="true"] .collapse-chevron .chevron-down {
+  opacity: 0;
+  transform: translateY(-0.2rem);
+}

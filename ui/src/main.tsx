@@ -2,9 +2,13 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
-import "@crestapps/bootstrap-select/dist/css/bootstrap-select.min.css";
-
+import '@crestapps/bootstrap-select/dist/css/bootstrap-select.css';
+import Selectpicker from '@crestapps/bootstrap-select/dist/js/bootstrap-select.esm.mjs';
 import { App } from './App';
+
+if (typeof window !== 'undefined') {
+  (window as any).Selectpicker = Selectpicker;
+}
 
 const applyBootstrapTheme = () => {
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');

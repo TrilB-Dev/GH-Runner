@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
+const dotenv_1 = __importDefault(require("dotenv"));
 const fs_1 = require("fs");
 const path_1 = require("path");
 const crypto_1 = require("crypto");
@@ -16,11 +17,136 @@ const settingsStorage_1 = require("./settingsStorage");
 const logger_1 = require("./logger");
 const DEFAULT_HOST_CONTAINER_NAME = 'gh-runner-host';
 const DEFAULT_RUNNER_ROOT_PATH = '/opt/github/runners';
+const LANGUAGE_DIR_CANDIDATES = [
+    (0, path_1.join)(__dirname, '..', '..', 'Language'),
+    (0, path_1.join)(__dirname, '..', 'Language'),
+    (0, path_1.join)(process.cwd(), '..', 'Language'),
+    (0, path_1.join)(process.cwd(), 'Language')
+];
+const DEFAULT_LANGUAGE_LIST = [
+    { code: 'en_GB', name: 'English (UK)' }
+];
 const EXTENSION_INFO = {
     name: 'GH Runner',
     author: 'MrTrilB',
     documentationUrl: 'https://github.com/MrTrilB/GH-Runner'
 };
+dotenv_1.default.config({ path: (0, path_1.join)(process.cwd(), '.env') });
+dotenv_1.default.config({ path: '/config/.env' });
+function getLanguageDir() {
+    for (const candidate of LANGUAGE_DIR_CANDIDATES) {
+        if ((0, fs_1.existsSync)(candidate)) {
+            return candidate;
+        }
+    }
+    throw new Error('Language folder not found. Expected a Language directory in the extension root.');
+}
+async function loadLanguageDefinitions() {
+    const languageDir = getLanguageDir();
+    const languageFile = (0, path_1.join)(languageDir, 'Languages.json');
+    try {
+        const raw = await fs_1.promises.readFile(languageFile, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.languages) && parsed.languages.length > 0) {
+            return parsed.languages;
+        }
+    }
+    catch {
+        // fall back to default list
+    }
+    return DEFAULT_LANGUAGE_LIST;
+}
+function unquotePoString(value) {
+    return value
+        .replace(/^"|"$/g, '')
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t')
+        .replace(/\\"/g, '"');
+}
+function parsePoContent(content) {
+    const lines = content.split(/\r?\n/);
+    const translations = {};
+    let msgid = '';
+    let msgstr = '';
+    let currentKey = null;
+    const finalize = () => {
+        if (msgid !== '') {
+            translations[msgid] = msgstr || msgid;
+        }
+        msgid = '';
+        msgstr = '';
+        currentKey = null;
+    };
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) {
+            continue;
+        }
+        if (trimmed.startsWith('msgid')) {
+            if (currentKey === 'msgstr') {
+                finalize();
+            }
+            else if (msgid || msgstr) {
+                finalize();
+            }
+            currentKey = 'msgid';
+            msgid = unquotePoString(trimmed.slice(5).trim());
+            continue;
+        }
+        if (trimmed.startsWith('msgstr')) {
+            currentKey = 'msgstr';
+            msgstr = unquotePoString(trimmed.slice(6).trim());
+            continue;
+        }
+        if (trimmed.startsWith('"') && currentKey) {
+            const appended = unquotePoString(trimmed);
+            if (currentKey === 'msgid') {
+                msgid += appended;
+            }
+            else if (currentKey === 'msgstr') {
+                msgstr += appended;
+            }
+        }
+    }
+    if (currentKey !== null) {
+        finalize();
+    }
+    return translations;
+}
+async function loadTranslations(language) {
+    const languageDir = getLanguageDir();
+    const potFile = (0, path_1.join)(languageDir, `GHRunner-${language}.pot`);
+    const moFile = (0, path_1.join)(languageDir, `GHRunner-${language}.mo`);
+    if ((0, fs_1.existsSync)(moFile)) {
+        const buffer = await fs_1.promises.readFile(moFile);
+        const parsed = parseMo(buffer);
+        return parsed;
+    }
+    if ((0, fs_1.existsSync)(potFile)) {
+        const content = await fs_1.promises.readFile(potFile, 'utf8');
+        return parsePoContent(content);
+    }
+    throw new Error(`Translation file not found for language ${language}`);
+}
+function parseMo(buffer) {
+    const header = buffer.readUInt32LE(0);
+    const littleEndian = header === 0x950412de;
+    const readUInt32 = littleEndian ? buffer.readUInt32LE.bind(buffer) : buffer.readUInt32BE.bind(buffer);
+    const n = readUInt32(8);
+    const origTableOffset = readUInt32(12);
+    const transTableOffset = readUInt32(16);
+    const translations = {};
+    for (let i = 0; i < n; i += 1) {
+        const origLength = readUInt32(origTableOffset + i * 8);
+        const origOffset = readUInt32(origTableOffset + i * 8 + 4);
+        const transLength = readUInt32(transTableOffset + i * 8);
+        const transOffset = readUInt32(transTableOffset + i * 8 + 4);
+        const orig = buffer.slice(origOffset, origOffset + origLength).toString('utf8');
+        const trans = buffer.slice(transOffset, transOffset + transLength).toString('utf8');
+        translations[orig] = trans || orig;
+    }
+    return translations;
+}
 function createErrorResponse(error) {
     if (error instanceof Error) {
         return {
@@ -54,6 +180,114 @@ function createErrorResponse(error) {
 function sendError(res, error, statusCode = 500) {
     res.status(statusCode).json(createErrorResponse(error));
 }
+const DEFAULT_GITHUB_APP_ID = process.env.GITHUB_APP_ID || process.env.AppID || '4592586';
+const DEFAULT_GITHUB_APP_SLUG = process.env.GITHUB_APP_SLUG || 'docker-gh-runner-manager';
+const DEFAULT_GITHUB_APP_INSTALL_URL = process.env.GITHUB_APP_INSTALL_URL || `https://github.com/apps/${DEFAULT_GITHUB_APP_SLUG}/installations/new`;
+const DEFAULT_GITHUB_APP_PRIVATE_KEY_FILE = (0, path_1.join)(__dirname, 'docker-gh-runner-manager.2026-08-14.private-key.pem');
+function getGithubAppPrivateKey() {
+    const rawKey = process.env.GITHUB_APP_PRIVATE_KEY;
+    const encodedKey = process.env.GITHUB_APP_PRIVATE_KEY_B64;
+    const privateKeyPath = process.env.GITHUB_APP_PRIVATE_KEY_PATH;
+    const clientKey = process.env.ClientKey || process.env.GITHUB_APP_CLIENT_KEY;
+    if (rawKey?.trim()) {
+        return rawKey.replace(/\\n/g, '\n');
+    }
+    if (encodedKey?.trim()) {
+        return Buffer.from(encodedKey, 'base64').toString('utf8');
+    }
+    const candidateKeys = [privateKeyPath, clientKey].filter(Boolean);
+    const candidatePaths = [
+        ...candidateKeys,
+        DEFAULT_GITHUB_APP_PRIVATE_KEY_FILE,
+        (0, path_1.join)(process.cwd(), clientKey || ''),
+        (0, path_1.join)(process.cwd(), privateKeyPath || ''),
+        (0, path_1.join)('/config', clientKey || ''),
+        (0, path_1.join)('/config', privateKeyPath || '')
+    ].filter((value) => Boolean(value));
+    for (const candidatePath of candidatePaths) {
+        try {
+            if ((0, fs_1.existsSync)(candidatePath)) {
+                const contents = (0, fs_1.readFileSync)(candidatePath, 'utf8');
+                if (contents.trim()) {
+                    return contents.replace(/\\n/g, '\n');
+                }
+            }
+        }
+        catch {
+            // ignore missing/invalid paths
+        }
+    }
+    if (clientKey?.trim() && clientKey.includes('-----BEGIN')) {
+        return clientKey.replace(/\\n/g, '\n');
+    }
+    return null;
+}
+function createGithubAppJwt() {
+    const appId = process.env.GITHUB_APP_ID || process.env.AppID || DEFAULT_GITHUB_APP_ID;
+    const privateKey = getGithubAppPrivateKey();
+    if (!appId || !privateKey) {
+        throw new Error('GitHub App is not configured. Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_B64, or include the default built-in app key.');
+    }
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+        iat: now - 60,
+        exp: now + 540,
+        iss: Number(appId)
+    };
+    const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const signingInput = `${encode({ alg: 'RS256', typ: 'JWT' })}.${encode(payload)}`;
+    const signer = (0, crypto_1.createSign)('RSA-SHA256');
+    signer.update(signingInput);
+    signer.end();
+    const signature = signer.sign(privateKey);
+    return `${signingInput}.${signature.toString('base64url')}`;
+}
+async function fetchGithubAppInstallations() {
+    const jwt = createGithubAppJwt();
+    const response = await fetch('https://api.github.com/app/installations', {
+        headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${jwt}`
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`Unable to list GitHub App installations (${response.status})`);
+    }
+    const installations = await response.json();
+    return installations;
+}
+function getGithubAppInstallUrl() {
+    return process.env.GITHUB_APP_INSTALL_URL?.trim() || DEFAULT_GITHUB_APP_INSTALL_URL;
+}
+async function createGithubAppInstallationToken(installationId) {
+    const jwt = createGithubAppJwt();
+    const response = await fetch(`https://api.github.com/app/installations/${installationId}/access_tokens`, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${jwt}`
+        },
+        body: JSON.stringify({})
+    });
+    if (!response.ok) {
+        throw new Error(`Unable to create GitHub App installation token (${response.status})`);
+    }
+    return await response.json();
+}
+const isGithubAppInstallationToken = (token) => typeof token.type === 'string' && token.type.toLowerCase().includes('github app');
+async function fetchInstallationRepositories(token) {
+    const response = await fetch('https://api.github.com/installation/repositories?per_page=100', {
+        headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `token ${token}`
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`Unable to fetch installation repositories (${response.status})`);
+    }
+    const json = await response.json();
+    return json.repositories;
+}
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
@@ -68,9 +302,71 @@ async function enrichRunner(runner) {
         usage: null
     };
 }
+async function synchronizeRunnerGroups(runners) {
+    const tokens = await (0, githubTokenStorage_1.loadGithubTokens)();
+    const groupCache = new Map();
+    let changed = false;
+    const synchronized = await Promise.all(runners.map(async (runner) => {
+        const token = tokens.find((item) => item.name === runner.tokenName);
+        if (!token) {
+            return runner;
+        }
+        const scopePath = runner.isOrg
+            ? `orgs/${encodeURIComponent(runner.owner)}`
+            : `repos/${encodeURIComponent(runner.owner)}/${encodeURIComponent(runner.repo)}`;
+        try {
+            const response = await fetch(`https://api.github.com/${scopePath}/actions/runners?per_page=100`, {
+                headers: {
+                    Accept: 'application/vnd.github+json',
+                    Authorization: `Bearer ${token.token}`
+                }
+            });
+            if (!response.ok) {
+                await (0, logger_1.logIfEnabled)('githubApi', `Unable to synchronize runner group for ${runner.runnerName} (${response.status})`);
+                return runner;
+            }
+            const json = await response.json();
+            const githubRunner = (json.runners || []).find((item) => item.name === runner.runnerName);
+            if (!githubRunner) {
+                return runner;
+            }
+            let githubGroup = typeof githubRunner.runner_group_name === 'string'
+                ? githubRunner.runner_group_name.trim() || undefined
+                : undefined;
+            if (!githubGroup && typeof githubRunner.runner_group_id === 'number') {
+                const groupCacheKey = `${token.id}:${scopePath}`;
+                let groupsPromise = groupCache.get(groupCacheKey);
+                if (!groupsPromise) {
+                    groupsPromise = fetchRunnerGroups(token.token, runner.owner, runner.repo || null, runner.isOrg);
+                    groupCache.set(groupCacheKey, groupsPromise);
+                }
+                const groups = await groupsPromise;
+                githubGroup = groups.find((group) => group.id === githubRunner.runner_group_id)?.name;
+            }
+            // Do not erase a known local group when GitHub omits group metadata.
+            if (!githubGroup) {
+                return runner;
+            }
+            if (githubGroup === runner.runnerGroup) {
+                return runner;
+            }
+            changed = true;
+            await (0, logger_1.logIfEnabled)('githubApi', `Synchronizing runner group for ${runner.runnerName}: ${runner.runnerGroup || '(none)'} -> ${githubGroup || '(none)'}`);
+            return { ...runner, runnerGroup: githubGroup };
+        }
+        catch (error) {
+            await (0, logger_1.logIfEnabled)('githubApi', `Runner group synchronization failed for ${runner.runnerName}: ${error}`);
+            return runner;
+        }
+    }));
+    if (changed) {
+        await (0, runnerStorage_1.saveRunners)(synchronized);
+    }
+    return synchronized;
+}
 app.get('/api/runners', async (_req, res) => {
     try {
-        const runners = await (0, runnerStorage_1.loadRunners)();
+        const runners = await synchronizeRunnerGroups(await (0, runnerStorage_1.loadRunners)());
         const enriched = await Promise.all(runners.map(enrichRunner));
         res.json(enriched);
     }
@@ -119,7 +415,6 @@ app.get('/api/extension-info', async (_req, res) => {
         const loggingSettings = await (0, settingsStorage_1.loadSettings)();
         const runnerStatuses = await Promise.all(runnerConfigs.map(async (runner) => (await (0, docker_1.getHostRunnerStatus)(runner.hostContainerName, runner.runnerPath)).status));
         const activeRunnerCount = runnerStatuses.filter((status) => status === 'on').length;
-        const runnerContainerStatus = runnerConfigs.length === 0 ? 'none' : activeRunnerCount > 0 ? 'active' : 'inactive';
         const runnerBaseVersion = await (0, docker_1.getHostRunnerBaseVersion)(DEFAULT_HOST_CONTAINER_NAME);
         const runnerVersions = await Promise.all(runnerConfigs.map(async (runner) => ({
             id: runner.id,
@@ -186,7 +481,8 @@ app.post('/api/settings', async (req, res) => {
             uiLoggingEnabled: Boolean(payload.uiLoggingEnabled),
             runnerLoggingEnabled: Boolean(payload.runnerLoggingEnabled),
             githubApiLoggingEnabled: Boolean(payload.githubApiLoggingEnabled),
-            startRunnersOnStartup: Boolean(payload.startRunnersOnStartup)
+            startRunnersOnStartup: Boolean(payload.startRunnersOnStartup),
+            language: typeof payload.language === 'string' && payload.language.trim() ? payload.language : 'en_GB'
         };
         await (0, settingsStorage_1.saveSettings)(settings);
         await (0, logger_1.logIfEnabled)('ui', `Saved extension settings: ${JSON.stringify(settings)}`);
@@ -194,6 +490,27 @@ app.post('/api/settings', async (req, res) => {
     }
     catch (error) {
         await (0, logger_1.logIfEnabled)('ui', `Failed to save settings: ${error}`);
+        sendError(res, error);
+    }
+});
+app.get('/api/languages', async (_req, res) => {
+    try {
+        const languages = await loadLanguageDefinitions();
+        res.json({ languages });
+    }
+    catch (error) {
+        await (0, logger_1.logIfEnabled)('ui', `Failed to load languages: ${error}`);
+        sendError(res, error);
+    }
+});
+app.get('/api/translations/:language', async (req, res) => {
+    try {
+        const language = req.params.language;
+        const translations = await loadTranslations(language);
+        res.json(translations);
+    }
+    catch (error) {
+        await (0, logger_1.logIfEnabled)('ui', `Failed to load translations: ${error}`);
         sendError(res, error);
     }
 });
@@ -237,6 +554,107 @@ app.post('/api/github-tokens', async (req, res) => {
         sendError(res, error);
     }
 });
+app.get('/api/github-app/auth-url', async (_req, res) => {
+    try {
+        const installUrl = getGithubAppInstallUrl();
+        if (!installUrl) {
+            return res.json({
+                url: '',
+                message: 'GitHub App installation URL is not configured. Set GITHUB_APP_INSTALL_URL or GITHUB_APP_SLUG in the backend environment.'
+            });
+        }
+        res.json({
+            url: installUrl,
+            message: 'Open this URL to install the GitHub App on your organization or repository.'
+        });
+    }
+    catch (error) {
+        await (0, logger_1.logIfEnabled)('githubApi', `Failed to get GitHub App install URL: ${error}`);
+        sendError(res, error);
+    }
+});
+app.get('/api/github-app/installations', async (_req, res) => {
+    try {
+        const installations = await fetchGithubAppInstallations();
+        res.json(installations.map((installation) => ({
+            id: installation.id,
+            account: installation.account,
+            targetId: installation.target_id,
+            repositorySelection: installation.repository_selection
+        })));
+    }
+    catch (error) {
+        await (0, logger_1.logIfEnabled)('githubApi', `Failed to list GitHub App installations: ${error}`);
+        sendError(res, error);
+    }
+});
+app.post('/api/github-app/installation-token', async (req, res) => {
+    try {
+        const requestedInstallationId = req.body?.installationId ? Number(req.body.installationId) : undefined;
+        const requestedOwner = String(req.body?.owner || '').trim().toLowerCase();
+        const name = String(req.body?.name || '').trim();
+        const installUrl = getGithubAppInstallUrl();
+        const installations = await fetchGithubAppInstallations();
+        if (installations.length === 0) {
+            return res.json({
+                success: false,
+                message: 'No GitHub App installations found. Install the app in the target organization or repository.',
+                installUrl: installUrl || undefined
+            });
+        }
+        let installation;
+        if (requestedInstallationId) {
+            installation = installations.find((item) => item.id === requestedInstallationId);
+            if (!installation) {
+                return res.status(400).json({ success: false, message: 'Requested GitHub App installation ID was not found.' });
+            }
+        }
+        if (!installation && requestedOwner) {
+            installation = installations.find((item) => item.account.login.toLowerCase() === requestedOwner);
+            if (!installation) {
+                return res.status(400).json({ success: false, message: `No GitHub App installation was found for owner ${requestedOwner}.` });
+            }
+        }
+        if (!installation && installations.length === 1) {
+            installation = installations[0];
+        }
+        if (!installation) {
+            return res.status(400).json({
+                success: false,
+                message: 'Multiple GitHub App installations exist. Select the installation in the app settings or supply the installation ID.',
+                installations: installations.map((item) => ({ id: item.id, owner: item.account.login })),
+                installUrl: installUrl || undefined
+            });
+        }
+        const tokenResponse = await createGithubAppInstallationToken(installation.id);
+        const tokenConfig = {
+            id: (0, crypto_1.randomUUID)(),
+            name: name || `GitHub App installation ${installation.account.login}`,
+            token: tokenResponse.token,
+            login: installation.account.login,
+            type: 'GitHub App Installation',
+            createdAt: new Date().toISOString()
+        };
+        await (0, githubTokenStorage_1.saveGithubToken)(tokenConfig);
+        await (0, logger_1.logIfEnabled)('githubApi', `Saved GitHub App installation token for ${installation.account.login}`);
+        const responseToken = {
+            id: tokenConfig.id,
+            name: tokenConfig.name,
+            login: tokenConfig.login,
+            type: tokenConfig.type,
+            createdAt: tokenConfig.createdAt
+        };
+        res.json({
+            success: true,
+            message: `GitHub App installation token created for ${installation.account.login}.`,
+            token: responseToken
+        });
+    }
+    catch (error) {
+        await (0, logger_1.logIfEnabled)('githubApi', `Failed to create GitHub App installation token: ${error}`);
+        sendError(res, error);
+    }
+});
 app.delete('/api/github-tokens/:id', async (req, res) => {
     try {
         await (0, githubTokenStorage_1.deleteGithubToken)(req.params.id);
@@ -273,18 +691,50 @@ const fetchRunnerGroups = async (token, owner, repo, isOrg) => {
     const response = await fetch(url, {
         headers: {
             Accept: 'application/vnd.github+json',
-            Authorization: `token ${token}`
+            Authorization: `Bearer ${token}`
         }
     });
     if (!response.ok) {
         await (0, logger_1.logIfEnabled)('githubApi', `Failed to fetch runner groups for ${owner} ${repo || ''}: ${response.status}`);
-        if (response.status === 404 || response.status === 403) {
-            return [];
+        let githubMessage = '';
+        try {
+            const errorBody = await response.json();
+            githubMessage = typeof errorBody.message === 'string' ? errorBody.message : '';
         }
-        throw new Error(`Unable to fetch runner groups (${response.status})`);
+        catch {
+            // The API may return an empty or non-JSON error response.
+        }
+        const reason = githubMessage || response.statusText || 'GitHub rejected the request.';
+        throw new Error(`Unable to fetch runner groups (${response.status}): ${reason}`);
     }
     const json = await response.json();
     return json.runner_groups.map((group) => ({ id: group.id, name: group.name }));
+};
+const removeGithubRunner = async (token, owner, repo, isOrg, runnerName) => {
+    const scopePath = isOrg
+        ? `orgs/${encodeURIComponent(owner)}`
+        : `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+    const baseUrl = `https://api.github.com/${scopePath}/actions/runners`;
+    const headers = {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`
+    };
+    const listResponse = await fetch(`${baseUrl}?per_page=100`, { headers });
+    if (!listResponse.ok) {
+        throw new Error(`Unable to list GitHub runners (${listResponse.status})`);
+    }
+    const json = await listResponse.json();
+    const githubRunner = (json.runners || []).find((runner) => runner.name === runnerName);
+    if (!githubRunner) {
+        return;
+    }
+    const deleteResponse = await fetch(`${baseUrl}/${githubRunner.id}`, {
+        method: 'DELETE',
+        headers
+    });
+    if (!deleteResponse.ok && deleteResponse.status !== 404) {
+        throw new Error(`Unable to delete GitHub runner (${deleteResponse.status})`);
+    }
 };
 app.get('/api/github-tokens/:id/repos', async (req, res) => {
     try {
@@ -293,17 +743,23 @@ app.get('/api/github-tokens/:id/repos', async (req, res) => {
             return res.status(404).json({ error: 'Token not found.' });
         }
         await (0, logger_1.logIfEnabled)('githubApi', `Fetching repos for token ${token.id}`);
-        const response = await fetch('https://api.github.com/user/repos?per_page=100', {
-            headers: {
-                Accept: 'application/vnd.github+json',
-                Authorization: `token ${token.token}`
-            }
-        });
-        if (!response.ok) {
-            await (0, logger_1.logIfEnabled)('githubApi', `Failed to fetch repos for token ${token.id}: ${response.status}`);
-            return res.status(response.status).json({ error: 'Unable to fetch repositories for this token.' });
+        let repos;
+        if (isGithubAppInstallationToken(token)) {
+            repos = await fetchInstallationRepositories(token.token);
         }
-        const repos = await response.json();
+        else {
+            const response = await fetch('https://api.github.com/user/repos?per_page=100', {
+                headers: {
+                    Accept: 'application/vnd.github+json',
+                    Authorization: `token ${token.token}`
+                }
+            });
+            if (!response.ok) {
+                await (0, logger_1.logIfEnabled)('githubApi', `Failed to fetch repos for token ${token.id}: ${response.status}`);
+                return res.status(response.status).json({ error: 'Unable to fetch repositories for this token.' });
+            }
+            repos = await response.json();
+        }
         res.json(repos.map((repo) => ({
             id: repo.id,
             name: repo.name,
@@ -330,6 +786,23 @@ app.get('/api/github-tokens/:id/repos/search', async (req, res) => {
         }
         if (!q) {
             return res.json([]);
+        }
+        if (isGithubAppInstallationToken(token)) {
+            const allRepos = await fetchInstallationRepositories(token.token);
+            const normalizedQuery = q.toLowerCase();
+            let filtered = allRepos.filter((repo) => repo.full_name.toLowerCase().includes(normalizedQuery) ||
+                repo.name.toLowerCase().includes(normalizedQuery) ||
+                repo.owner.login.toLowerCase().includes(normalizedQuery));
+            if (owner) {
+                filtered = filtered.filter((repo) => repo.owner.login.toLowerCase() === owner.toLowerCase());
+            }
+            return res.json(filtered.slice(0, 50).map((repo) => ({
+                id: repo.id,
+                name: repo.name,
+                full_name: repo.full_name,
+                private: repo.private,
+                owner: repo.owner.login
+            })));
         }
         const searchGithubRepos = async (qualifier) => {
             const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(`${q} ${qualifier}`)}&per_page=50`;
@@ -376,24 +849,28 @@ app.get('/api/github-tokens/:id/runner-groups', async (req, res) => {
     try {
         const token = await (0, githubTokenStorage_1.getGithubTokenById)(req.params.id);
         if (!token) {
-            return res.status(404).json({ error: 'Token not found.' });
+            return res.json({ groups: [], error: 'Token not found.' });
         }
         const owner = String(req.query.owner || '');
         const repo = req.query.repo ? String(req.query.repo) : null;
         const isOrg = String(req.query.isOrg || 'false') === 'true';
         if (!owner) {
-            return res.status(400).json({ error: 'Owner/org is required.' });
+            return res.json({ groups: [], error: 'Owner/org is required.' });
         }
         try {
             const groups = await fetchRunnerGroups(token.token, owner, repo, isOrg);
-            res.json(groups);
+            res.json({ groups });
         }
         catch (err) {
-            sendError(res, err);
+            const errorResponse = createErrorResponse(err);
+            await (0, logger_1.logIfEnabled)('githubApi', `Runner group request failed for ${owner} ${repo || ''}: ${errorResponse.error}`);
+            res.json({ groups: [], error: errorResponse.error, details: errorResponse.details });
         }
     }
     catch (error) {
-        sendError(res, error);
+        const errorResponse = createErrorResponse(error);
+        await (0, logger_1.logIfEnabled)('githubApi', `Runner group request failed before GitHub call: ${errorResponse.error}`);
+        res.json({ groups: [], error: errorResponse.error, details: errorResponse.details });
     }
 });
 app.post('/api/github-tokens/:id/registration-token', async (req, res) => {
@@ -440,6 +917,9 @@ app.post('/api/runners', async (req, res) => {
             repo: payload.repo || '',
             isOrg: payload.isOrg,
             tokenName: payload.tokenName || '',
+            runnerGroup: payload.isOrg && typeof payload.runnerGroup === 'string'
+                ? payload.runnerGroup.trim() || undefined
+                : undefined,
             labels: Array.isArray(payload.labels)
                 ? payload.labels
                 : String(payload.labels).split(',').map((label) => label.trim()).filter(Boolean),
@@ -504,6 +984,9 @@ app.put('/api/runners/:id', async (req, res) => {
             repo: payload.repo ?? existing.repo,
             isOrg: typeof payload.isOrg === 'boolean' ? payload.isOrg : existing.isOrg,
             tokenName: payload.tokenName ?? existing.tokenName,
+            runnerGroup: (typeof payload.isOrg === 'boolean' ? payload.isOrg : existing.isOrg) && typeof payload.runnerGroup === 'string'
+                ? payload.runnerGroup.trim() || undefined
+                : (typeof payload.isOrg === 'boolean' ? payload.isOrg : existing.isOrg) ? existing.runnerGroup : undefined,
             labels: Array.isArray(payload.labels)
                 ? payload.labels
                 : payload.labels
@@ -515,6 +998,31 @@ app.put('/api/runners/:id', async (req, res) => {
             runnerPath: existing.runnerPath,
             createdAt: existing.createdAt
         };
+        const runnerGroupChanged = updated.runnerGroup !== existing.runnerGroup;
+        if (runnerGroupChanged) {
+            if (!updated.tokenName) {
+                return res.status(400).json({ error: 'A saved GitHub token is required to change the runner group.' });
+            }
+            const githubToken = (await (0, githubTokenStorage_1.loadGithubTokens)()).find((item) => item.name === updated.tokenName);
+            if (!githubToken) {
+                return res.status(400).json({ error: `The saved GitHub token "${updated.tokenName}" was not found.` });
+            }
+            const registrationToken = await fetchRegistrationToken(githubToken.token, updated.owner, updated.repo || null, updated.isOrg);
+            const wasRunning = (await (0, docker_1.getHostRunnerStatus)(existing.hostContainerName, existing.runnerPath)).status === 'on';
+            await (0, docker_1.stopHostRunner)(existing.hostContainerName, existing.runnerPath);
+            try {
+                await (0, docker_1.createRunnerInHostContainer)(updated.hostContainerName, updated.runnerPath, updated.githubUrl, updated.owner, updated.repo, updated.isOrg, registrationToken, updated.runnerName, updated.labels, updated.runnerGroup);
+            }
+            catch (error) {
+                if (wasRunning) {
+                    await (0, docker_1.startHostRunner)(existing.hostContainerName, existing.runnerPath).catch(() => undefined);
+                }
+                throw error;
+            }
+            if (wasRunning) {
+                await (0, docker_1.startHostRunner)(updated.hostContainerName, updated.runnerPath);
+            }
+        }
         await (0, runnerStorage_1.saveRunner)(updated);
         await (0, logger_1.logIfEnabled)('ui', `Updated runner ${updated.runnerName} (${updated.id})`);
         res.json({ success: true, runner: updated });
@@ -532,11 +1040,20 @@ app.delete('/api/runners/:id', async (req, res) => {
         if (!existing) {
             return res.status(404).json({ error: 'Runner not found.' });
         }
+        if (!existing.tokenName) {
+            return res.status(400).json({ error: 'The saved GitHub token for this runner was not found.' });
+        }
+        const githubToken = (await (0, githubTokenStorage_1.loadGithubTokens)()).find((item) => item.name === existing.tokenName);
+        if (!githubToken) {
+            return res.status(400).json({ error: `The saved GitHub token "${existing.tokenName}" was not found.` });
+        }
+        await removeGithubRunner(githubToken.token, existing.owner, existing.repo, existing.isOrg, existing.runnerName);
         try {
             await (0, docker_1.removeHostRunner)(existing.hostContainerName, existing.runnerPath);
         }
-        catch {
-            // ignore cleanup errors
+        catch (error) {
+            await (0, logger_1.logIfEnabled)('runner', `Failed to remove runner directory ${existing.runnerPath}: ${error}`);
+            throw error;
         }
         await (0, runnerStorage_1.deleteRunner)(id);
         await (0, logger_1.logIfEnabled)('ui', `Deleted runner ${existing.runnerName} (${existing.id})`);
@@ -643,7 +1160,21 @@ app.post('/api/clear-volume', async (req, res) => {
         if (!name) {
             return res.status(400).json({ error: 'Volume name is required.' });
         }
-        await (0, docker_1.removeVolume)(name);
+        if (name === 'gh-runner-manager-runners') {
+            const runners = await (0, runnerStorage_1.loadRunners)();
+            await Promise.all(runners.map(async (runner) => {
+                try {
+                    await (0, docker_1.stopHostRunner)(runner.hostContainerName, runner.runnerPath);
+                }
+                catch (error) {
+                    await (0, logger_1.logIfEnabled)('ui', `Unable to stop runner ${runner.runnerName} before clearing volume: ${error}`);
+                }
+            }));
+        }
+        await (0, docker_1.clearVolumeContents)(name);
+        if (name === 'gh-runner-manager-runners') {
+            await (0, runnerStorage_1.saveRunners)([]);
+        }
         await (0, logger_1.logIfEnabled)('ui', `Cleared volume ${name}`);
         res.json({ success: true });
     }
@@ -716,6 +1247,7 @@ async function startServer() {
     app.listen(socketPath, () => {
         console.log(`GitHub Runner Manager listening on socket ${socketPath}`);
     });
+    console.log(`GitHub App private key source: ${(0, fs_1.existsSync)(DEFAULT_GITHUB_APP_PRIVATE_KEY_FILE) ? 'built-in default key file' : 'runtime env/config path'}`);
     try {
         await (0, docker_1.ensureRunnerHostContainer)(DEFAULT_HOST_CONTAINER_NAME);
         await startSavedRunnersOnStartup();

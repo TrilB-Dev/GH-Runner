@@ -1,0 +1,492 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: GH Runner Manager 1.0
+"
+"Report-Msgid-Bugs-To: 
+"
+"POT-Creation-Date: 2026-01-01 00:00+0000
+"
+"PO-Revision-Date: 2026-01-01 00:00+0000
+"
+"Last-Translator: MrTrilB <mrtrilb@trilb.dev>
+"
+"Language-Team: English (UK) <translation@trilb.dev>
+"
+"Language: en_GB
+"
+"MIME-Version: 1.0
+"
+"Content-Type: text/plain; charset=UTF-8
+"
+"Content-Transfer-Encoding: 8bit
+"
+"Plural-Forms: nplurals=2; plural=(n != 1);
+"
+msgid ""
+msgstr ""
+
+msgid ".bootstrap-select"
+msgstr ""
+
+msgid "/"
+msgstr ""
+
+msgid "A friendly name to identify this token in the runner creation form."
+msgstr ""
+
+msgid "A local identifier for this runner. It becomes the runner directory name inside the host container."
+msgstr ""
+
+msgid "Add GitHub PAT"
+msgstr ""
+
+msgid "Add a new GitHub PAT"
+msgstr ""
+
+msgid "Add runner"
+msgstr ""
+
+msgid "All logs will be saved here."
+msgstr ""
+
+msgid "All runners up to date."
+msgstr ""
+
+msgid "Author:"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Checks that GitHub’s public API is reachable from the extension environment."
+msgstr ""
+
+msgid "Checks whether the GitHub Runners container is installed and ready."
+msgstr ""
+
+msgid "Choose a language for the extension UI."
+msgstr ""
+
+msgid "Choose your UI appearance preference."
+msgstr ""
+
+msgid "Clear"
+msgstr ""
+
+msgid "Clear all data from Data Volume"
+msgstr ""
+
+msgid "Clear all data from Runners Volume"
+msgstr ""
+
+msgid "Close"
+msgstr ""
+
+msgid "Configure startup behavior and UI preferences."
+msgstr ""
+
+msgid "Confirms the extension data volume is present for persistent backend state."
+msgstr ""
+
+msgid "Copied"
+msgstr ""
+
+msgid "Copy"
+msgstr ""
+
+msgid "Core metadata and health status for the extension environment."
+msgstr ""
+
+msgid "Create new runner"
+msgstr ""
+
+msgid "Created:"
+msgstr ""
+
+msgid "Dark"
+msgstr ""
+
+msgid "Data Volume"
+msgstr ""
+
+msgid "Delete"
+msgstr ""
+
+msgid "Derived from the selected token or selected repository. Edit for org or alternate owner."
+msgstr ""
+
+msgid "Documentation:"
+msgstr ""
+
+msgid "Down"
+msgstr ""
+
+msgid "Edit"
+msgstr ""
+
+msgid "Edit runner"
+msgstr ""
+
+msgid "Enable GitHub API Logging"
+msgstr ""
+
+msgid "Enable GitHub API logging for troubleshooting."
+msgstr ""
+
+msgid "Enable Runner Logging"
+msgstr ""
+
+msgid "Enable Runner logging for troubleshooting."
+msgstr ""
+
+msgid "Enable UI Logging"
+msgstr ""
+
+msgid "Enable UI logging to help with troubleshooting."
+msgstr ""
+
+msgid "Ensures the runner volume is available for storing GitHub Actions runner state."
+msgstr ""
+
+msgid "Extension Log Panel"
+msgstr ""
+
+msgid "Extension details"
+msgstr ""
+
+msgid "Extension information"
+msgstr ""
+
+msgid "Friendly name for this token"
+msgstr ""
+
+msgid "GH Runner"
+msgstr ""
+
+msgid "General"
+msgstr ""
+
+msgid "General settings"
+msgstr ""
+
+msgid "Get started by creating your first GitHub self-hosted runner."
+msgstr ""
+
+msgid "GitHub API token"
+msgstr ""
+
+msgid "GitHub Auth"
+msgstr ""
+
+msgid "GitHub PAT"
+msgstr ""
+
+msgid "GitHub Runner Manager"
+msgstr ""
+
+msgid "GitHub Runners Container"
+msgstr ""
+
+msgid "GitHub personal access token used to enumerate repositories and validate access."
+msgstr ""
+
+msgid "Github API"
+msgstr ""
+
+msgid "Health summary"
+msgstr ""
+
+msgid "Hide error details"
+msgstr ""
+
+msgid "Hide logs"
+msgstr ""
+
+msgid "If enabled, this runner will be started automatically when the Docker backend starts and the global startup setting is enabled."
+msgstr ""
+
+msgid "Info"
+msgstr ""
+
+msgid "Labels:"
+msgstr ""
+
+msgid "Language"
+msgstr ""
+
+msgid "Light"
+msgstr ""
+
+msgid "Loading languages…"
+msgstr ""
+
+msgid "Loading logs..."
+msgstr ""
+
+msgid "Loading runner groups…"
+msgstr ""
+
+msgid "Loading runner version info..."
+msgstr ""
+
+msgid "Loading runners …"
+msgstr ""
+
+msgid "Loading runners, please wait..."
+msgstr ""
+
+msgid "Logging"
+msgstr ""
+
+msgid "Logs"
+msgstr ""
+
+msgid "Manage all of your GitHub self-hosted runners inside Docker Desktop."
+msgstr ""
+
+msgid "Manage runner host updates, persistent volume data, and logging."
+msgstr ""
+
+msgid "Name:"
+msgstr ""
+
+msgid "No logs available."
+msgstr ""
+
+msgid "No runner group"
+msgstr ""
+
+msgid "No saved GitHub authentication methods yet. Add one below to access repository lists in the runner form."
+msgstr ""
+
+msgid "Not available"
+msgstr ""
+
+msgid "Optional runner group for organization or repository runners."
+msgstr ""
+
+msgid "Organisation-level runner"
+msgstr ""
+
+msgid "Owner / organization"
+msgstr ""
+
+msgid "Owner is fixed to the selected GitHub token."
+msgstr ""
+
+msgid "Owner set for this runner and cannot be changed from this edit view."
+msgstr ""
+
+msgid "Personal access token"
+msgstr ""
+
+msgid "Recommended permissions:"
+msgstr ""
+
+msgid "Refresh"
+msgstr ""
+
+msgid "Refresh Runner Host Container"
+msgstr ""
+
+msgid "Refresh host"
+msgstr ""
+
+msgid "Refresh host container"
+msgstr ""
+
+msgid "Refresh the Runner Host to apply any updates to the container."
+msgstr ""
+
+msgid "Refreshing runner status..."
+msgstr ""
+
+msgid "Repository"
+msgstr ""
+
+msgid "Restart"
+msgstr ""
+
+msgid "Restart all"
+msgstr ""
+
+msgid "Restart all runners"
+msgstr ""
+
+msgid "Runner Version:"
+msgstr ""
+
+msgid "Runner Volume"
+msgstr ""
+
+msgid "Runner base version:"
+msgstr ""
+
+msgid "Runner group"
+msgstr ""
+
+msgid "Runner labels"
+msgstr ""
+
+msgid "Runner name"
+msgstr ""
+
+msgid "Runner path:"
+msgstr ""
+
+msgid "Runners"
+msgstr ""
+
+msgid "Running"
+msgstr ""
+
+msgid "Save runner"
+msgstr ""
+
+msgid "Save token"
+msgstr ""
+
+msgid "Saved GitHub Authentication Methods"
+msgstr ""
+
+msgid "Saving…"
+msgstr ""
+
+msgid "Search languages"
+msgstr ""
+
+msgid "Search or create tags"
+msgstr ""
+
+msgid "Search repositories for the selected owner using GitHub. Leave blank for an organization-level runner."
+msgstr ""
+
+msgid "Select a repository"
+msgstr ""
+
+msgid "Select a saved token"
+msgstr ""
+
+msgid "Select a saved token to load repositories and derive the owner."
+msgstr ""
+
+msgid "Select an owner"
+msgstr ""
+
+msgid "Select language"
+msgstr ""
+
+msgid "Select one or more labels used by GitHub workflows to target this runner."
+msgstr ""
+
+msgid "Service Container"
+msgstr ""
+
+msgid "Settings"
+msgstr ""
+
+msgid "Show error details"
+msgstr ""
+
+msgid "Start"
+msgstr ""
+
+msgid "Start all"
+msgstr ""
+
+msgid "Start all runners"
+msgstr ""
+
+msgid "Start on startup"
+msgstr ""
+
+msgid "Start runners on Docker startup"
+msgstr ""
+
+msgid "Start runners when Docker Desktop starts-up. You will be able to disable this per runner."
+msgstr ""
+
+msgid "Start this runner on Docker startup"
+msgstr ""
+
+msgid "Stop"
+msgstr ""
+
+msgid "Stop all"
+msgstr ""
+
+msgid "Stop all runners"
+msgstr ""
+
+msgid "Stopped"
+msgstr ""
+
+msgid "System"
+msgstr ""
+
+msgid "Toggle log panel"
+msgstr ""
+
+msgid "Toggle logs panel"
+msgstr ""
+
+msgid "Token name"
+msgstr ""
+
+msgid "Tools"
+msgstr ""
+
+msgid "UI Style"
+msgstr ""
+
+msgid "Unable to load logs."
+msgstr ""
+
+msgid "Up"
+msgstr ""
+
+msgid "Up to Date"
+msgstr ""
+
+msgid "Update Runners"
+msgstr ""
+
+msgid "Verifies the Docker host container for the extension is running and available."
+msgstr ""
+
+msgid "Version:"
+msgstr ""
+
+msgid "View docs"
+msgstr ""
+
+msgid "View logs"
+msgstr ""
+
+msgid "WARNING: This will remove all extension data from the persistent volume."
+msgstr ""
+
+msgid "WARNING: This will remove all runner data from the persistent volume."
+msgstr ""
+
+msgid "You don't have any runners configured yet."
+msgstr ""
+
+msgid "runner(s) need update."
+msgstr ""
+
+msgid "saved"
+msgstr ""
+
+msgid "unknown"
+msgstr ""
+
+msgid "• read:org (if using organization-owned runners)"
+msgstr ""
+
+msgid "• repo (full repository access for private repos)"
+msgstr ""
+
+msgid "• workflow (optional, for workflow-related access if needed)"
+msgstr ""
+

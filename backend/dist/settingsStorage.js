@@ -10,7 +10,8 @@ const defaultSettings = {
     uiLoggingEnabled: false,
     runnerLoggingEnabled: false,
     githubApiLoggingEnabled: false,
-    startRunnersOnStartup: false
+    startRunnersOnStartup: false,
+    language: 'en_GB'
 };
 async function loadSettings() {
     try {
@@ -21,7 +22,8 @@ async function loadSettings() {
             uiLoggingEnabled: parsed.uiLoggingEnabled ?? defaultSettings.uiLoggingEnabled,
             runnerLoggingEnabled: parsed.runnerLoggingEnabled ?? defaultSettings.runnerLoggingEnabled,
             githubApiLoggingEnabled: parsed.githubApiLoggingEnabled ?? defaultSettings.githubApiLoggingEnabled,
-            startRunnersOnStartup: parsed.startRunnersOnStartup ?? defaultSettings.startRunnersOnStartup
+            startRunnersOnStartup: parsed.startRunnersOnStartup ?? defaultSettings.startRunnersOnStartup,
+            language: parsed.language ?? defaultSettings.language
         };
     }
     catch (error) {

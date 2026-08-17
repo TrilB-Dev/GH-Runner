@@ -6,6 +6,7 @@
   "dependencies": {
     "@crestapps/bootstrap-select": "^1.2.4",
     "@docker/extension-api-client": "0.4.2",
+    "@fortawesome/free-brands-svg-icons": "^7.3.1",
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.5.0",
     "bootstrap": "^5.3.8",
