@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.logIfEnabled = logIfEnabled;
 const logStorage_1 = require("./logStorage");
 const settingsStorage_1 = require("./settingsStorage");
+const translation_1 = require("./translation");
 async function logIfEnabled(category, entry) {
     try {
         const settings = await (0, settingsStorage_1.loadSettings)();
@@ -17,5 +18,5 @@ async function logIfEnabled(category, entry) {
     catch {
         // If settings cannot be read, fallback to logging the entry so diagnostics are still available.
     }
-    await (0, logStorage_1.appendLogEntry)(`[${category}] ${entry}`);
+    await (0, logStorage_1.appendLogEntry)(`[${category}] ${(0, translation_1.t)(entry)}`);
 }

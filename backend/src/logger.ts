@@ -1,5 +1,6 @@
 import { appendLogEntry } from './logStorage';
 import { loadSettings } from './settingsStorage';
+import { t } from './translation';
 
 export type LogCategory = 'ui' | 'runner' | 'githubApi' | 'general';
 
@@ -19,5 +20,5 @@ export async function logIfEnabled(category: LogCategory, entry: string) {
     // If settings cannot be read, fallback to logging the entry so diagnostics are still available.
   }
 
-  await appendLogEntry(`[${category}] ${entry}`);
+  await appendLogEntry(`[${category}] ${t(entry)}`);
 }

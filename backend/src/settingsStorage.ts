@@ -16,7 +16,7 @@ const defaultSettings: LoggingSettings = {
   uiLoggingEnabled: false,
   runnerLoggingEnabled: false,
   githubApiLoggingEnabled: false,
-  startRunnersOnStartup: false,
+  startRunnersOnStartup: true,
   language: 'en_GB'
 };
 

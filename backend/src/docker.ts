@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { promisify } from 'util';
+import { t } from './translation';
 
 const execFileAsync = promisify(execFile);
 const HOST_RUNNER_VOLUME = 'gh-runner-manager-runners';
@@ -129,7 +130,7 @@ async function waitForContainerReady(containerName: string, timeoutMs = 180000) 
     }
     await sleep(1000);
   }
-  throw new Error(`Timeout waiting for container ${containerName} to become ready`);
+  throw new Error(t('Timeout waiting for container {containerName} to become ready', { containerName }));
 }
 
 async function isHostBootstrapReady(containerName: string): Promise<boolean> {
@@ -213,7 +214,7 @@ export async function ensureRunnerHostContainer(containerName: string) {
 
   if (needsBootstrap || needsRecreate) {
     if (!needsBootstrap) {
-      console.warn(`Host container ${containerName} is stale or missing volume metadata. Recreating.`);
+      console.warn(t('Host container {containerName} is stale or missing volume metadata. Recreating.', { containerName }));
       await runDocker(['rm', '-f', containerName]);
     }
     await bootstrapHostContainer(containerName);
@@ -222,7 +223,7 @@ export async function ensureRunnerHostContainer(containerName: string) {
   }
 
   if (!(await isHostRunnerVolumeMounted(containerName))) {
-    console.warn(`Host container ${containerName} exists without persistent runner volume. Recreating with ${HOST_RUNNER_VOLUME}.`);
+    console.warn(t('Host container {containerName} exists without persistent runner volume. Recreating with {volumeName}.', { containerName, volumeName: HOST_RUNNER_VOLUME }));
     await runDocker(['rm', '-f', containerName]);
     await bootstrapHostContainer(containerName);
     await waitForContainerReady(containerName);
@@ -329,7 +330,7 @@ export async function getHostRunnerStatus(hostContainer: string, runnerPath: str
     }
     return { status: 'on', raw: raw.trim() };
   } catch (err) {
-    console.warn(`Failed to determine runner status for ${runnerPath}:`, err);
+    console.warn(t('Failed to determine runner status for {runnerPath}:', { runnerPath }), err);
     return { status: 'off', raw: '' };
   }
 }
@@ -389,7 +390,7 @@ async function waitForRunnerStopped(hostContainer: string, runnerPath: string, t
     }
     await sleep(500);
   }
-  throw new Error(`Timeout waiting for runner at ${runnerPath} to stop`);
+  throw new Error(t('Timeout waiting for runner at {runnerPath} to stop', { runnerPath }));
 }
 
 export async function stopHostRunner(hostContainer: string, runnerPath: string) {
@@ -411,7 +412,7 @@ export async function removeHostRunner(hostContainer: string, runnerPath: string
   try {
     await stopHostRunner(hostContainer, runnerPath);
   } catch (error) {
-    console.warn(`Failed to stop runner at ${runnerPath} before cleanup:`, error);
+    console.warn(t('Failed to stop runner at {runnerPath} before cleanup:', { runnerPath }), error);
   }
 
   const escapedRunnerPath = runnerPath.replace(/'/g, "'\\''");
@@ -419,7 +420,7 @@ export async function removeHostRunner(hostContainer: string, runnerPath: string
 
   const remaining = await dockerExec(hostContainer, ['sh', '-c', `test ! -e '${escapedRunnerPath}' && echo removed || echo present`]);
   if (remaining.trim() !== 'removed') {
-    throw new Error(`Runner directory was not removed: ${runnerPath}`);
+    throw new Error(t('Runner directory was not removed: {runnerPath}', { runnerPath }));
   }
 }
 

@@ -1,4 +1,4 @@
-IMAGE?=mrtrilb/gh-runner
+IMAGE?=mrtrilb/gh-runner-manager
 TAG?=latest
 
 BUILDER=buildx-multi-arch

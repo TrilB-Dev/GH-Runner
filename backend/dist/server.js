@@ -15,6 +15,7 @@ const githubTokenStorage_1 = require("./githubTokenStorage");
 const logStorage_1 = require("./logStorage");
 const settingsStorage_1 = require("./settingsStorage");
 const logger_1 = require("./logger");
+const translation_1 = require("./translation");
 const DEFAULT_HOST_CONTAINER_NAME = 'gh-runner-host';
 const DEFAULT_RUNNER_ROOT_PATH = '/opt/github/runners';
 const LANGUAGE_DIR_CANDIDATES = [
@@ -39,7 +40,7 @@ function getLanguageDir() {
             return candidate;
         }
     }
-    throw new Error('Language folder not found. Expected a Language directory in the extension root.');
+    throw new Error((0, translation_1.t)('Language folder not found. Expected a Language directory in the extension root.'));
 }
 async function loadLanguageDefinitions() {
     const languageDir = getLanguageDir();
@@ -126,7 +127,7 @@ async function loadTranslations(language) {
         const content = await fs_1.promises.readFile(potFile, 'utf8');
         return parsePoContent(content);
     }
-    throw new Error(`Translation file not found for language ${language}`);
+    throw new Error((0, translation_1.t)('Translation file not found for language {language}', { language }));
 }
 function parseMo(buffer) {
     const header = buffer.readUInt32LE(0);
@@ -150,7 +151,7 @@ function parseMo(buffer) {
 function createErrorResponse(error) {
     if (error instanceof Error) {
         return {
-            error: error.message || 'An unexpected error occurred.',
+            error: error.message || (0, translation_1.t)('An unexpected error occurred.'),
             details: error.stack ?? undefined
         };
     }
@@ -171,11 +172,11 @@ function createErrorResponse(error) {
             detailsParts.push(`cmd: ${errObj.cmd.trim()}`);
         }
         return {
-            error: message || 'An unexpected error occurred.',
+            error: message || (0, translation_1.t)('An unexpected error occurred.'),
             details: detailsParts.length > 0 ? detailsParts.join('\n') : undefined
         };
     }
-    return { error: String(error) || 'An unexpected error occurred.' };
+    return { error: String(error) || (0, translation_1.t)('An unexpected error occurred.') };
 }
 function sendError(res, error, statusCode = 500) {
     res.status(statusCode).json(createErrorResponse(error));
@@ -226,7 +227,7 @@ function createGithubAppJwt() {
     const appId = process.env.GITHUB_APP_ID || process.env.AppID || DEFAULT_GITHUB_APP_ID;
     const privateKey = getGithubAppPrivateKey();
     if (!appId || !privateKey) {
-        throw new Error('GitHub App is not configured. Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_B64, or include the default built-in app key.');
+        throw new Error((0, translation_1.t)('GitHub App is not configured. Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_B64, or include the default built-in app key.'));
     }
     const now = Math.floor(Date.now() / 1000);
     const payload = {
@@ -251,7 +252,7 @@ async function fetchGithubAppInstallations() {
         }
     });
     if (!response.ok) {
-        throw new Error(`Unable to list GitHub App installations (${response.status})`);
+        throw new Error((0, translation_1.t)('Unable to list GitHub App installations ({status})', { status: response.status }));
     }
     const installations = await response.json();
     return installations;
@@ -270,7 +271,7 @@ async function createGithubAppInstallationToken(installationId) {
         body: JSON.stringify({})
     });
     if (!response.ok) {
-        throw new Error(`Unable to create GitHub App installation token (${response.status})`);
+        throw new Error((0, translation_1.t)('Unable to create GitHub App installation token ({status})', { status: response.status }));
     }
     return await response.json();
 }
@@ -283,7 +284,7 @@ async function fetchInstallationRepositories(token) {
         }
     });
     if (!response.ok) {
-        throw new Error(`Unable to fetch installation repositories (${response.status})`);
+        throw new Error((0, translation_1.t)('Unable to fetch installation repositories ({status})', { status: response.status }));
     }
     const json = await response.json();
     return json.repositories;
@@ -388,7 +389,7 @@ app.get('/api/extension-info', async (_req, res) => {
         const tokens = await (0, githubTokenStorage_1.loadGithubTokens)();
         let githubApiConnection = {
             status: 'warning',
-            message: 'No GitHub token configured.'
+            message: (0, translation_1.t)('No GitHub token configured.')
         };
         try {
             await (0, logger_1.logIfEnabled)('githubApi', 'Checking GitHub API connectivity');
@@ -398,12 +399,12 @@ app.get('/api/extension-info', async (_req, res) => {
                 }
             });
             githubApiConnection = response.ok
-                ? { status: 'up', message: 'GitHub API is reachable.' }
-                : { status: 'down', message: `GitHub API returned ${response.status}.` };
+                ? { status: 'up', message: (0, translation_1.t)('GitHub API is reachable.') }
+                : { status: 'down', message: (0, translation_1.t)('GitHub API returned {status}.', { status: response.status }) };
             await (0, logger_1.logIfEnabled)('githubApi', `GitHub API status: ${githubApiConnection.status}`);
         }
         catch (err) {
-            githubApiConnection = { status: 'down', message: 'Unable to reach GitHub API.' };
+            githubApiConnection = { status: 'down', message: (0, translation_1.t)('Unable to reach GitHub API.') };
             await (0, logger_1.logIfEnabled)('githubApi', `GitHub API connectivity check failed: ${err}`);
         }
         const hostHealth = await (0, docker_1.getRunnerHostHealth)(DEFAULT_HOST_CONTAINER_NAME);
@@ -518,7 +519,7 @@ app.post('/api/github-tokens', async (req, res) => {
     try {
         const payload = req.body;
         if (!payload.name || !payload.token) {
-            return res.status(400).json({ error: 'Token name and token are required.' });
+            return res.status(400).json({ error: (0, translation_1.t)('Token name and token are required.') });
         }
         const response = await fetch('https://api.github.com/user', {
             headers: {
@@ -527,7 +528,7 @@ app.post('/api/github-tokens', async (req, res) => {
             }
         });
         if (!response.ok) {
-            return res.status(400).json({ error: 'Unable to validate token with GitHub. Please check permissions and token validity.' });
+            return res.status(400).json({ error: (0, translation_1.t)('Unable to validate token with GitHub. Please check permissions and token validity.') });
         }
         const user = await response.json();
         const tokenConfig = {
@@ -558,11 +559,11 @@ app.put('/api/github-tokens/:id', async (req, res) => {
     try {
         const tokenValue = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
         if (!tokenValue) {
-            return res.status(400).json({ error: 'Replacement token is required.' });
+            return res.status(400).json({ error: (0, translation_1.t)('Replacement token is required.') });
         }
         const existingToken = await (0, githubTokenStorage_1.getGithubTokenById)(req.params.id);
         if (!existingToken) {
-            return res.status(404).json({ error: 'GitHub token not found.' });
+            return res.status(404).json({ error: (0, translation_1.t)('GitHub token not found.') });
         }
         const response = await fetch('https://api.github.com/user', {
             headers: {
@@ -571,7 +572,7 @@ app.put('/api/github-tokens/:id', async (req, res) => {
             }
         });
         if (!response.ok) {
-            return res.status(400).json({ error: 'Unable to validate token with GitHub. Please check permissions and token validity.' });
+            return res.status(400).json({ error: (0, translation_1.t)('Unable to validate token with GitHub. Please check permissions and token validity.') });
         }
         const user = await response.json();
         const tokenConfig = {
@@ -602,12 +603,12 @@ app.get('/api/github-app/auth-url', async (_req, res) => {
         if (!installUrl) {
             return res.json({
                 url: '',
-                message: 'GitHub App installation URL is not configured. Set GITHUB_APP_INSTALL_URL or GITHUB_APP_SLUG in the backend environment.'
+                message: (0, translation_1.t)('GitHub App installation URL is not configured. Set GITHUB_APP_INSTALL_URL or GITHUB_APP_SLUG in the backend environment.')
             });
         }
         res.json({
             url: installUrl,
-            message: 'Open this URL to install the GitHub App on your organization or repository.'
+            message: (0, translation_1.t)('Open this URL to install the GitHub App on your organization or repository.')
         });
     }
     catch (error) {
@@ -640,7 +641,7 @@ app.post('/api/github-app/installation-token', async (req, res) => {
         if (installations.length === 0) {
             return res.json({
                 success: false,
-                message: 'No GitHub App installations found. Install the app in the target organization or repository.',
+                message: (0, translation_1.t)('No GitHub App installations found. Install the app in the target organization or repository.'),
                 installUrl: installUrl || undefined
             });
         }
@@ -648,13 +649,13 @@ app.post('/api/github-app/installation-token', async (req, res) => {
         if (requestedInstallationId) {
             installation = installations.find((item) => item.id === requestedInstallationId);
             if (!installation) {
-                return res.status(400).json({ success: false, message: 'Requested GitHub App installation ID was not found.' });
+                return res.status(400).json({ success: false, message: (0, translation_1.t)('Requested GitHub App installation ID was not found.') });
             }
         }
         if (!installation && requestedOwner) {
             installation = installations.find((item) => item.account.login.toLowerCase() === requestedOwner);
             if (!installation) {
-                return res.status(400).json({ success: false, message: `No GitHub App installation was found for owner ${requestedOwner}.` });
+                return res.status(400).json({ success: false, message: (0, translation_1.t)('No GitHub App installation was found for owner {owner}.', { owner: requestedOwner }) });
             }
         }
         if (!installation && installations.length === 1) {
@@ -663,7 +664,7 @@ app.post('/api/github-app/installation-token', async (req, res) => {
         if (!installation) {
             return res.status(400).json({
                 success: false,
-                message: 'Multiple GitHub App installations exist. Select the installation in the app settings or supply the installation ID.',
+                message: (0, translation_1.t)('Multiple GitHub App installations exist. Select the installation in the app settings or supply the installation ID.'),
                 installations: installations.map((item) => ({ id: item.id, owner: item.account.login })),
                 installUrl: installUrl || undefined
             });
@@ -688,7 +689,7 @@ app.post('/api/github-app/installation-token', async (req, res) => {
         };
         res.json({
             success: true,
-            message: `GitHub App installation token created for ${installation.account.login}.`,
+            message: (0, translation_1.t)('GitHub App installation token created for {owner}.', { owner: installation.account.login }),
             token: responseToken
         });
     }
@@ -704,7 +705,7 @@ app.delete('/api/github-tokens/:id', async (req, res) => {
         res.json({ success: true });
     }
     catch (error) {
-        await (0, logStorage_1.appendLogEntry)(`Failed to delete GitHub token ${req.params.id}: ${error}`);
+        await (0, logStorage_1.appendLogEntry)((0, translation_1.t)('Failed to delete GitHub token {tokenId}: {error}', { tokenId: req.params.id, error: String(error) }));
         sendError(res, error);
     }
 });
@@ -720,7 +721,7 @@ const fetchRegistrationToken = async (token, owner, repo, isOrg) => {
         }
     });
     if (!response.ok) {
-        throw new Error(`Unable to generate registration token (${response.status})`);
+        throw new Error((0, translation_1.t)('Unable to generate registration token ({status})', { status: response.status }));
     }
     const json = await response.json();
     return json.token;
@@ -747,7 +748,7 @@ const fetchRunnerGroups = async (token, owner, repo, isOrg) => {
             // The API may return an empty or non-JSON error response.
         }
         const reason = githubMessage || response.statusText || 'GitHub rejected the request.';
-        throw new Error(`Unable to fetch runner groups (${response.status}): ${reason}`);
+        throw new Error((0, translation_1.t)('Unable to fetch runner groups ({status}): {reason}', { status: response.status, reason }));
     }
     const json = await response.json();
     return json.runner_groups.map((group) => ({ id: group.id, name: group.name }));
@@ -763,7 +764,7 @@ const removeGithubRunner = async (token, owner, repo, isOrg, runnerName) => {
     };
     const listResponse = await fetch(`${baseUrl}?per_page=100`, { headers });
     if (!listResponse.ok) {
-        throw new Error(`Unable to list GitHub runners (${listResponse.status})`);
+        throw new Error((0, translation_1.t)('Unable to list GitHub runners ({status})', { status: listResponse.status }));
     }
     const json = await listResponse.json();
     const githubRunner = (json.runners || []).find((runner) => runner.name === runnerName);
@@ -775,14 +776,14 @@ const removeGithubRunner = async (token, owner, repo, isOrg, runnerName) => {
         headers
     });
     if (!deleteResponse.ok && deleteResponse.status !== 404) {
-        throw new Error(`Unable to delete GitHub runner (${deleteResponse.status})`);
+        throw new Error((0, translation_1.t)('Unable to delete GitHub runner ({status})', { status: deleteResponse.status }));
     }
 };
 app.get('/api/github-tokens/:id/repos', async (req, res) => {
     try {
         const token = await (0, githubTokenStorage_1.getGithubTokenById)(req.params.id);
         if (!token) {
-            return res.status(404).json({ error: 'Token not found.' });
+            return res.status(404).json({ error: (0, translation_1.t)('Token not found.') });
         }
         await (0, logger_1.logIfEnabled)('githubApi', `Fetching repos for token ${token.id}`);
         let repos;
@@ -798,7 +799,7 @@ app.get('/api/github-tokens/:id/repos', async (req, res) => {
             });
             if (!response.ok) {
                 await (0, logger_1.logIfEnabled)('githubApi', `Failed to fetch repos for token ${token.id}: ${response.status}`);
-                return res.status(response.status).json({ error: 'Unable to fetch repositories for this token.' });
+                return res.status(response.status).json({ error: (0, translation_1.t)('Unable to fetch repositories for this token.') });
             }
             repos = await response.json();
         }
@@ -807,7 +808,8 @@ app.get('/api/github-tokens/:id/repos', async (req, res) => {
             name: repo.name,
             full_name: repo.full_name,
             private: repo.private,
-            owner: repo.owner.login
+            owner: repo.owner.login,
+            ownerType: repo.owner.type
         })));
     }
     catch (error) {
@@ -818,13 +820,13 @@ app.get('/api/github-tokens/:id/repos/search', async (req, res) => {
     try {
         const token = await (0, githubTokenStorage_1.getGithubTokenById)(req.params.id);
         if (!token) {
-            return res.status(404).json({ error: 'Token not found.' });
+            return res.status(404).json({ error: (0, translation_1.t)('Token not found.') });
         }
         const owner = String(req.query.owner || '');
         const q = String(req.query.q || '').trim();
         const isOrg = String(req.query.isOrg || 'false') === 'true';
         if (!owner) {
-            return res.status(400).json({ error: 'Owner/org is required.' });
+            return res.status(400).json({ error: (0, translation_1.t)('Owner/org is required.') });
         }
         if (!q) {
             return res.json([]);
@@ -891,13 +893,13 @@ app.get('/api/github-tokens/:id/runner-groups', async (req, res) => {
     try {
         const token = await (0, githubTokenStorage_1.getGithubTokenById)(req.params.id);
         if (!token) {
-            return res.json({ groups: [], error: 'Token not found.' });
+            return res.json({ groups: [], error: (0, translation_1.t)('Token not found.') });
         }
         const owner = String(req.query.owner || '');
         const repo = req.query.repo ? String(req.query.repo) : null;
         const isOrg = String(req.query.isOrg || 'false') === 'true';
         if (!owner) {
-            return res.json({ groups: [], error: 'Owner/org is required.' });
+            return res.json({ groups: [], error: (0, translation_1.t)('Owner/org is required.') });
         }
         try {
             const groups = await fetchRunnerGroups(token.token, owner, repo, isOrg);
@@ -919,13 +921,13 @@ app.post('/api/github-tokens/:id/registration-token', async (req, res) => {
     try {
         const token = await (0, githubTokenStorage_1.getGithubTokenById)(req.params.id);
         if (!token) {
-            return res.status(404).json({ error: 'Token not found.' });
+            return res.status(404).json({ error: (0, translation_1.t)('Token not found.') });
         }
         const owner = String(req.body.owner || '');
         const repo = req.body.repo ? String(req.body.repo) : null;
         const isOrg = Boolean(req.body.isOrg);
         if (!owner) {
-            return res.status(400).json({ error: 'Owner/org is required.' });
+            return res.status(400).json({ error: (0, translation_1.t)('Owner/org is required.') });
         }
         const registrationToken = await fetchRegistrationToken(token.token, owner, repo, isOrg);
         await (0, logger_1.logIfEnabled)('githubApi', `Obtained GitHub runner registration token for ${owner} ${repo || ''}`);
@@ -940,13 +942,21 @@ app.post('/api/runners', async (req, res) => {
     try {
         const payload = req.body;
         if (!payload.runnerName || !payload.githubUrl || !payload.owner || typeof payload.isOrg !== 'boolean' || !payload.labels) {
-            return res.status(400).json({ error: 'Missing required runner fields.' });
+            return res.status(400).json({ error: (0, translation_1.t)('Missing required runner fields.') });
+        }
+        const runnerName = payload.runnerName;
+        if (!/^[A-Za-z0-9_-]+$/.test(runnerName)) {
+            return res.status(400).json({ error: (0, translation_1.t)('Runner name may contain only letters, numbers, hyphens, and underscores.') });
+        }
+        const existingRunners = await (0, runnerStorage_1.loadRunners)();
+        if (existingRunners.some((runner) => runner.runnerName.toLowerCase() === runnerName.toLowerCase())) {
+            return res.status(409).json({ error: (0, translation_1.t)('A runner with this name already exists.') });
         }
         if (!payload.isOrg && !payload.repo) {
-            return res.status(400).json({ error: 'Repository is required when registering a repository-scoped runner.' });
+            return res.status(400).json({ error: (0, translation_1.t)('Repository is required when registering a repository-scoped runner.') });
         }
         if (!payload.registrationToken && !payload.selectedTokenId) {
-            return res.status(400).json({ error: 'Registration token is required to create a runner, or select a saved GitHub token to generate one.' });
+            return res.status(400).json({ error: (0, translation_1.t)('Registration token is required to create a runner, or select a saved GitHub token to generate one.') });
         }
         const id = (0, crypto_1.randomUUID)();
         const safeName = payload.runnerName.toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
@@ -974,11 +984,11 @@ app.post('/api/runners', async (req, res) => {
         let registrationToken = payload.registrationToken;
         if (!registrationToken) {
             if (!payload.selectedTokenId) {
-                return res.status(400).json({ error: 'A saved GitHub API token must be selected to generate a registration token.' });
+                return res.status(400).json({ error: (0, translation_1.t)('A saved GitHub API token must be selected to generate a registration token.') });
             }
             const githubToken = await (0, githubTokenStorage_1.getGithubTokenById)(payload.selectedTokenId);
             if (!githubToken) {
-                return res.status(400).json({ error: 'Selected GitHub token not found.' });
+                return res.status(400).json({ error: (0, translation_1.t)('Selected GitHub token not found.') });
             }
             try {
                 registrationToken = await fetchRegistrationToken(githubToken.token, runner.owner, runner.repo || null, runner.isOrg);
@@ -995,12 +1005,12 @@ app.post('/api/runners', async (req, res) => {
         }
         catch (error) {
             await (0, logger_1.logIfEnabled)('runner', `Failed to create runner ${runner.runnerName}: ${error}`);
-            console.error('Runner creation failed:', error);
+            console.error((0, translation_1.t)('Runner creation failed:'), error);
             try {
                 await (0, docker_1.removeHostRunner)(runner.hostContainerName, runner.runnerPath);
             }
             catch (cleanupError) {
-                console.error('Runner cleanup failed:', cleanupError);
+                console.error((0, translation_1.t)('Runner cleanup failed:'), cleanupError);
             }
             sendError(res, error);
         }
@@ -1016,7 +1026,7 @@ app.put('/api/runners/:id', async (req, res) => {
         const runners = await (0, runnerStorage_1.loadRunners)();
         const existing = runners.find((r) => r.id === id);
         if (!existing) {
-            return res.status(404).json({ error: 'Runner not found.' });
+            return res.status(404).json({ error: (0, translation_1.t)('Runner not found.') });
         }
         const updated = {
             ...existing,
@@ -1040,14 +1050,20 @@ app.put('/api/runners/:id', async (req, res) => {
             runnerPath: existing.runnerPath,
             createdAt: existing.createdAt
         };
+        if (!/^[A-Za-z0-9_-]+$/.test(updated.runnerName)) {
+            return res.status(400).json({ error: (0, translation_1.t)('Runner name may contain only letters, numbers, hyphens, and underscores.') });
+        }
+        if (runners.some((runner) => runner.id !== id && runner.runnerName.toLowerCase() === updated.runnerName.toLowerCase())) {
+            return res.status(409).json({ error: (0, translation_1.t)('A runner with this name already exists.') });
+        }
         const runnerGroupChanged = updated.runnerGroup !== existing.runnerGroup;
         if (runnerGroupChanged) {
             if (!updated.tokenName) {
-                return res.status(400).json({ error: 'A saved GitHub token is required to change the runner group.' });
+                return res.status(400).json({ error: (0, translation_1.t)('A saved GitHub token is required to change the runner group.') });
             }
             const githubToken = (await (0, githubTokenStorage_1.loadGithubTokens)()).find((item) => item.name === updated.tokenName);
             if (!githubToken) {
-                return res.status(400).json({ error: `The saved GitHub token "${updated.tokenName}" was not found.` });
+                return res.status(400).json({ error: (0, translation_1.t)('The saved GitHub token "{tokenName}" was not found.', { tokenName: updated.tokenName }) });
             }
             const registrationToken = await fetchRegistrationToken(githubToken.token, updated.owner, updated.repo || null, updated.isOrg);
             const wasRunning = (await (0, docker_1.getHostRunnerStatus)(existing.hostContainerName, existing.runnerPath)).status === 'on';
@@ -1080,14 +1096,14 @@ app.delete('/api/runners/:id', async (req, res) => {
         const runners = await (0, runnerStorage_1.loadRunners)();
         const existing = runners.find((r) => r.id === id);
         if (!existing) {
-            return res.status(404).json({ error: 'Runner not found.' });
+            return res.status(404).json({ error: (0, translation_1.t)('Runner not found.') });
         }
         if (!existing.tokenName) {
-            return res.status(400).json({ error: 'The saved GitHub token for this runner was not found.' });
+            return res.status(400).json({ error: (0, translation_1.t)('The saved GitHub token for this runner was not found.') });
         }
         const githubToken = (await (0, githubTokenStorage_1.loadGithubTokens)()).find((item) => item.name === existing.tokenName);
         if (!githubToken) {
-            return res.status(400).json({ error: `The saved GitHub token "${existing.tokenName}" was not found.` });
+            return res.status(400).json({ error: (0, translation_1.t)('The saved GitHub token "{tokenName}" was not found.', { tokenName: existing.tokenName }) });
         }
         await removeGithubRunner(githubToken.token, existing.owner, existing.repo, existing.isOrg, existing.runnerName);
         try {
@@ -1129,7 +1145,7 @@ app.post('/api/runners/all/:action', async (req, res) => {
                         await (0, logger_1.logIfEnabled)('runner', `Restarted runner ${runner.runnerName} (${runner.id})`);
                         break;
                     default:
-                        throw new Error('Invalid action.');
+                        throw new Error((0, translation_1.t)('Invalid action.'));
                 }
                 return {
                     id: runner.id,
@@ -1160,7 +1176,7 @@ app.post('/api/runners/:id/:action', async (req, res) => {
         const runners = await (0, runnerStorage_1.loadRunners)();
         const runner = runners.find((r) => r.id === id);
         if (!runner) {
-            return res.status(404).json({ error: 'Runner not found.' });
+            return res.status(404).json({ error: (0, translation_1.t)('Runner not found.') });
         }
         await (0, docker_1.ensureRunnerHostContainer)(runner.hostContainerName);
         switch (action) {
@@ -1177,7 +1193,7 @@ app.post('/api/runners/:id/:action', async (req, res) => {
                 await (0, logger_1.logIfEnabled)('runner', `Restarted runner ${runner.runnerName} (${runner.id})`);
                 break;
             default:
-                return res.status(400).json({ error: 'Invalid action.' });
+                return res.status(400).json({ error: (0, translation_1.t)('Invalid action.') });
         }
         res.json({ success: true, runnerName: runner.runnerName });
     }
@@ -1200,7 +1216,7 @@ app.post('/api/clear-volume', async (req, res) => {
     try {
         const name = String(req.body.name || '');
         if (!name) {
-            return res.status(400).json({ error: 'Volume name is required.' });
+            return res.status(400).json({ error: (0, translation_1.t)('Volume name is required.') });
         }
         if (name === 'gh-runner-manager-runners') {
             const runners = await (0, runnerStorage_1.loadRunners)();
@@ -1231,18 +1247,18 @@ app.get('/api/logs', async (_req, res) => {
         res.json({ logs });
     }
     catch (error) {
-        await (0, logStorage_1.appendLogEntry)(`Failed to read logs: ${error}`);
+        await (0, logStorage_1.appendLogEntry)((0, translation_1.t)('Failed to read logs: {error}', { error: String(error) }));
         sendError(res, error);
     }
 });
 app.post('/api/logs/clear', async (_req, res) => {
     try {
         await (0, logStorage_1.clearLogEntries)();
-        await (0, logStorage_1.appendLogEntry)('Extension logs cleared');
+        await (0, logStorage_1.appendLogEntry)((0, translation_1.t)('Extension logs cleared'));
         res.json({ success: true });
     }
     catch (error) {
-        await (0, logStorage_1.appendLogEntry)(`Failed to clear logs: ${error}`);
+        await (0, logStorage_1.appendLogEntry)((0, translation_1.t)('Failed to clear logs: {error}', { error: String(error) }));
         sendError(res, error);
     }
 });
@@ -1258,47 +1274,58 @@ if ((0, fs_1.existsSync)(socketPath)) {
     (0, fs_1.rmSync)(socketPath);
 }
 async function startSavedRunnersOnStartup() {
-    try {
-        const settings = await (0, settingsStorage_1.loadSettings)();
-        if (!settings.startRunnersOnStartup) {
-            return;
-        }
-        const runners = await (0, runnerStorage_1.loadRunners)();
-        if (runners.length === 0) {
-            return;
-        }
-        await (0, docker_1.ensureRunnerHostContainer)(DEFAULT_HOST_CONTAINER_NAME);
-        await Promise.all(runners.filter((runner) => runner.startOnStartup).map(async (runner) => {
-            try {
-                const status = await (0, docker_1.getHostRunnerStatus)(runner.hostContainerName, runner.runnerPath);
-                if (status.status !== 'on') {
-                    await (0, docker_1.startHostRunner)(runner.hostContainerName, runner.runnerPath);
-                    await (0, logger_1.logIfEnabled)('runner', `Auto-started runner ${runner.runnerName} (${runner.id}) on startup`);
+    const startupAttempts = 5;
+    for (let attempt = 1; attempt <= startupAttempts; attempt += 1) {
+        try {
+            const settings = await (0, settingsStorage_1.loadSettings)();
+            if (!settings.startRunnersOnStartup) {
+                await (0, logger_1.logIfEnabled)('runner', 'Automatic runner startup is disabled in extension settings');
+                return;
+            }
+            const runners = (await (0, runnerStorage_1.loadRunners)()).filter((runner) => runner.startOnStartup);
+            if (runners.length === 0) {
+                return;
+            }
+            await (0, docker_1.ensureRunnerHostContainer)(DEFAULT_HOST_CONTAINER_NAME);
+            await Promise.all(runners.map(async (runner) => {
+                try {
+                    const status = await (0, docker_1.getHostRunnerStatus)(runner.hostContainerName, runner.runnerPath);
+                    if (status.status !== 'on') {
+                        await (0, docker_1.startHostRunner)(runner.hostContainerName, runner.runnerPath);
+                        await (0, logger_1.logIfEnabled)('runner', `Auto-started runner ${runner.runnerName} (${runner.id}) on startup`);
+                    }
                 }
+                catch (error) {
+                    await (0, logger_1.logIfEnabled)('runner', `Failed to auto-start runner ${runner.runnerName} (${runner.id}): ${error}`);
+                }
+            }));
+            return;
+        }
+        catch (error) {
+            await (0, logger_1.logIfEnabled)('runner', `Auto-start runner startup attempt ${attempt}/${startupAttempts} failed: ${error}`);
+            if (attempt < startupAttempts) {
+                await new Promise((resolve) => setTimeout(resolve, 3000));
             }
-            catch (error) {
-                await (0, logger_1.logIfEnabled)('runner', `Failed to auto-start runner ${runner.runnerName} (${runner.id}): ${error}`);
-            }
-        }));
+        }
     }
-    catch (error) {
-        await (0, logger_1.logIfEnabled)('runner', `Auto-start runner startup process failed: ${error}`);
-    }
+    await (0, logger_1.logIfEnabled)('runner', 'Auto-start runner startup process failed after all retries');
 }
 async function startServer() {
     app.listen(socketPath, () => {
-        console.log(`GitHub Runner Manager listening on socket ${socketPath}`);
+        console.log((0, translation_1.t)('GitHub Runner Manager listening on socket {socketPath}', { socketPath }));
     });
-    console.log(`GitHub App private key source: ${(0, fs_1.existsSync)(DEFAULT_GITHUB_APP_PRIVATE_KEY_FILE) ? 'built-in default key file' : 'runtime env/config path'}`);
+    console.log((0, translation_1.t)('GitHub App private key source: {source}', {
+        source: (0, fs_1.existsSync)(DEFAULT_GITHUB_APP_PRIVATE_KEY_FILE) ? 'built-in default key file' : 'runtime env/config path'
+    }));
     try {
         await (0, docker_1.ensureRunnerHostContainer)(DEFAULT_HOST_CONTAINER_NAME);
         await startSavedRunnersOnStartup();
     }
     catch (error) {
-        console.error('Runner host container initialization failed:', error);
+        console.error((0, translation_1.t)('Runner host container initialization failed:'), error);
     }
 }
 startServer().catch((error) => {
-    console.error('Failed to start server:', error);
+    console.error((0, translation_1.t)('Failed to start server:'), error);
     process.exit(1);
 });

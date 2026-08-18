@@ -10,7 +10,7 @@ const defaultSettings = {
     uiLoggingEnabled: false,
     runnerLoggingEnabled: false,
     githubApiLoggingEnabled: false,
-    startRunnersOnStartup: false,
+    startRunnersOnStartup: true,
     language: 'en_GB'
 };
 async function loadSettings() {

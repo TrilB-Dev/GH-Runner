@@ -50,6 +50,7 @@ interface RepoOption {
   full_name: string;
   private: boolean;
   owner: string;
+  ownerType?: string;
 }
 
 interface RunnerForm {
@@ -118,6 +119,7 @@ export function App() {
   const [showDialog, setShowDialog] = useState(false);
   const [editing, setEditing] = useState<Runner | null>(null);
   const [formState, setFormState] = useState<RunnerForm>(defaultFormState);
+  const [runnerNameTouched, setRunnerNameTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [errorDetailsOpen, setErrorDetailsOpen] = useState(false);
@@ -190,6 +192,21 @@ export function App() {
   const [tokenActionMessage, setTokenActionMessage] = useState<string | null>(null);
   const [showTokenForm, setShowTokenForm] = useState(false);
   const [githubTokens, setGithubTokens] = useState<GithubTokenResponse[]>([]);
+  const [customLabels, setCustomLabels] = useState<string[]>(() => {
+    if (typeof window === 'undefined') {
+      return [];
+    }
+
+    try {
+      const storedLabels = JSON.parse(window.localStorage.getItem('github-runner-manager-custom-labels') || '[]');
+      return Array.isArray(storedLabels)
+        ? storedLabels.filter((label): label is string => typeof label === 'string' && label.trim().length > 0)
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  const [githubTokensLoaded, setGithubTokensLoaded] = useState(false);
   const [repoOptions, setRepoOptions] = useState<RepoOption[]>([]);
   const [selectedRepoOption, setSelectedRepoOption] = useState<RepoOption | null>(null);
   const [orgRunnerSelected, setOrgRunnerSelected] = useState(false);
@@ -529,7 +546,17 @@ export function App() {
     return repoOptions.filter((repo) => repo.owner === formState.owner);
   }, [repoOptions, formState.owner]);
 
-  const showOrgRunnerOption = Boolean(formState.owner && formState.repo === '');
+  const ownerTypes = useMemo(() => {
+    const types = new Map<string, string>();
+    repoOptions.forEach((repo) => {
+      if (repo.ownerType) {
+        types.set(repo.owner, repo.ownerType);
+      }
+    });
+    return types;
+  }, [repoOptions]);
+  const isOrganizationOwner = ownerTypes.get(formState.owner)?.toLowerCase() === 'organization';
+  const showOrgRunnerOption = Boolean(formState.owner && formState.repo === '' && isOrganizationOwner);
   const formEnabled = editing || Boolean(formState.selectedTokenId);
   const hasSelectedToken = Boolean(selectedToken);
   const ownerSelected = Boolean(formState.owner);
@@ -542,6 +569,19 @@ export function App() {
   const showRunnerGroupField = isOrgRunnerSelected;
   const showRunnerNameField = editing || repositorySelected || isOrgRunnerSelected;
   const showRunnerTagsField = editing || runnerNameFilled;
+  const runnerNameValue = formState.runnerName.trim();
+  const runnerNameFormatValid = /^[A-Za-z0-9_-]+$/.test(runnerNameValue);
+  const duplicateRunner = runners.find((runner) =>
+    runner.id !== editing?.id && runner.runnerName.toLowerCase() === runnerNameValue.toLowerCase()
+  );
+  const runnerNameValid = Boolean(runnerNameValue) && runnerNameFormatValid && !duplicateRunner;
+  const runnerNameValidationMessage = !runnerNameValue
+    ? 'Runner name is required.'
+    : !runnerNameFormatValid
+      ? 'Runner name may contain only letters, numbers, hyphens, and underscores.'
+      : duplicateRunner
+        ? 'A runner with this name already exists. Choose a unique name.'
+        : null;
   const runnerGroupOptions = useMemo(() => {
     if (!formState.runnerGroup || runnerGroups.some((group) => group.name === formState.runnerGroup)) {
       return runnerGroups;
@@ -549,6 +589,10 @@ export function App() {
 
     return [{ id: -1, name: formState.runnerGroup }, ...runnerGroups];
   }, [runnerGroups, formState.runnerGroup]);
+  const availableLabelOptions = useMemo(
+    () => Array.from(new Set([...labelOptions, ...customLabels])),
+    [customLabels]
+  );
   const runnerGroupsByToken = useMemo(() => {
     const tokenMap = new Map<string, Map<string, Runner[]>>();
 
@@ -799,6 +843,7 @@ export function App() {
     try {
       const tokens = await serviceGet<GithubTokenResponse[]>('/api/github-tokens', 30000);
       setGithubTokens(tokens || []);
+      setGithubTokensLoaded(true);
     } catch (err) {
       handleError(err);
     }
@@ -1245,7 +1290,8 @@ export function App() {
     window.localStorage.setItem('runnerLoggingEnabled', JSON.stringify(runnerLoggingEnabled));
     window.localStorage.setItem('githubApiLoggingEnabled', JSON.stringify(githubApiLoggingEnabled));
     window.localStorage.setItem('language', language);
-  }, [startRunnersOnStartup, uiStyle, uiLoggingEnabled, runnerLoggingEnabled, githubApiLoggingEnabled, language]);
+    window.localStorage.setItem('github-runner-manager-custom-labels', JSON.stringify(customLabels));
+  }, [startRunnersOnStartup, uiStyle, uiLoggingEnabled, runnerLoggingEnabled, githubApiLoggingEnabled, language, customLabels]);
 
   useEffect(() => {
     if (language) {
@@ -1327,6 +1373,7 @@ export function App() {
   }, [showDialog]);
 
   const openDialog = (runner?: Runner) => {
+    setRunnerNameTouched(false);
     if (!runner && githubTokens.length === 0) {
       setSettingsTab('auth');
       setSettingsOpen(true);
@@ -1357,10 +1404,22 @@ export function App() {
     setShowDialog(true);
   };
 
+  const openGithubTokenSettings = () => {
+    setEditingGithubTokenId(null);
+    setTokenFormName('');
+    setTokenFormValue('');
+    setTokenFormError(null);
+    setTokenActionMessage(null);
+    setSettingsTab('auth');
+    setShowTokenForm(true);
+    setSettingsOpen(true);
+  };
+
   const closeDialog = () => {
     setShowDialog(false);
     setEditing(null);
     setFormState(defaultFormState);
+    setRunnerNameTouched(false);
   };
 
   useEffect(() => {
@@ -1392,6 +1451,17 @@ export function App() {
       return;
     }
 
+    const runnerName = formState.runnerName.trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(runnerName)) {
+      setError(t('Runner name may contain only letters, numbers, hyphens, and underscores.'));
+      return;
+    }
+
+    if (duplicateRunner) {
+      setError(t('A runner with this name already exists. Choose a unique name.'));
+      return;
+    }
+
     if (!formState.owner.trim()) {
       setError(t('Owner/organization is required.'));
       return;
@@ -1408,7 +1478,7 @@ export function App() {
         ? runnerGroupSelect?.value.trim() || formState.runnerGroup?.trim() || undefined
         : undefined;
       const payload: RunnerSavePayload = {
-        runnerName: formState.runnerName,
+        runnerName,
         githubUrl: GITHUB_BASE_URL,
         owner: formState.owner,
         repo: formState.repo,
@@ -1665,7 +1735,12 @@ export function App() {
         </div>
       </div>
 
-      {error ? <div className="alert alert-danger">{error}</div> : null}
+      {error ? (
+        <div className="alert alert-danger alert-dismissible fade show" role="alert">
+          {error}
+          <button type="button" className="btn-close" aria-label={t('Dismiss')} onClick={() => setError(null)} />
+        </div>
+      ) : null}
       {errorDetails ? (
         <div className="mb-3">
           <button
@@ -1682,7 +1757,12 @@ export function App() {
           ) : null}
         </div>
       ) : null}
-      {backendMessage && !error ? <div className="alert alert-info">{backendMessage}</div> : null}
+      {backendMessage && !error ? (
+        <div className="alert alert-info alert-dismissible fade show" role="alert">
+          {backendMessage}
+          <button type="button" className="btn-close" aria-label={t('Dismiss')} onClick={() => setBackendMessage(null)} />
+        </div>
+      ) : null}
       {loading && !runners.length ? (
         <div className="alert alert-info d-flex align-items-center" role="status">
           <div className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
@@ -1730,14 +1810,6 @@ export function App() {
           </div>
         </div>
       ) : null}
-      {autoStartRunnerCount > 0 ? (
-        <div className="mb-3">
-          <span className="badge bg-info text-dark">
-            {autoStartRunnerCount} runner{autoStartRunnerCount === 1 ? '' : 's'} configured to auto-start
-          </span>
-        </div>
-      ) : null}
-
       <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-2">
         <h2 className="h5 mb-0">{t('Runners')}</h2>
         <div className="btn-group btn-group-sm">
@@ -2160,8 +2232,18 @@ export function App() {
                             />
                             <div className="form-text">{t('GitHub personal access token used to enumerate repositories and validate access.')}</div>
                           </div>
-                          {tokenFormError ? <div className="alert alert-danger">{tokenFormError}</div> : null}
-                          {tokenActionMessage ? <div className="alert alert-success">{tokenActionMessage}</div> : null}
+                          {tokenFormError ? (
+                            <div className="alert alert-danger alert-dismissible fade show" role="alert">
+                              {tokenFormError}
+                              <button type="button" className="btn-close" aria-label={t('Dismiss')} onClick={() => setTokenFormError(null)} />
+                            </div>
+                          ) : null}
+                          {tokenActionMessage ? (
+                            <div className="alert alert-success alert-dismissible fade show" role="alert">
+                              {tokenActionMessage}
+                              <button type="button" className="btn-close" aria-label={t('Dismiss')} onClick={() => setTokenActionMessage(null)} />
+                            </div>
+                          ) : null}
                           <div className="d-flex gap-2">
                             <button type="button" className="btn btn-primary" onClick={editingGithubTokenId ? updateGithubToken : createGithubToken} data-bs-toggle="tooltip" title={editingGithubTokenId ? t('Update token') : t('Save token')}>
                               {editingGithubTokenId ? t('Update token') : t('Save token')}
@@ -2171,13 +2253,54 @@ export function App() {
                             </button>
                           </div>
                           <div className="mt-3 text-muted small">
-                            <p className="mb-1">{t('Recommended permissions:')}</p>
-                            <p className="mb-0">{t('• repo (full repository access for private repos)')}</p>
-                            <p className="mb-0">{t('• read:org (if using organization-owned runners)')}</p>
-                            <p className="mb-0">{t('• workflow (optional, for workflow-related access if needed)')}</p>
+                            <p className="mb-1">{t('Required classic PAT permissions:')}</p>
+                            <p className="mb-0">{t('• repo (repository runner access)')}</p>
+                            <p className="mb-0">{t('• admin:org (organization runner and runner group access)')}</p>
                           </div>
                         </div>
                       )}
+
+                      <div className="token-information mt-4">
+                        <h6 className="mb-0">
+                          <button
+                            className="btn d-flex align-items-center gap-2 px-0"
+                            type="button"
+                            role="button"
+                            data-bs-target="#collapse-about-tokens"
+                            aria-expanded="false"
+                            aria-controls="collapse-about-tokens"
+                            onClick={toggleCollapse}
+                          >
+                            <strong>{t('About Tokens')}</strong>
+                            <span className="collapse-chevron" aria-hidden="true">
+                              <FontAwesomeIcon icon={faChevronDown} className="chevron-down" />
+                              <FontAwesomeIcon icon={faChevronUp} className="chevron-up" />
+                            </span>
+                          </button>
+                        </h6>
+                        <div id="collapse-about-tokens" className="collapse">
+                          <div className="pt-3 text-muted">
+                            <p>{t('GH Runner Manager uses PATs or Personal Access Tokens to form an API connection to GitHub, which allows GH Runner Manager to create, edit and delete self-hosted runners from the Extensions UI.')}</p>
+                            <p>
+                              <a
+                                href="https://github.com/settings/tokens"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  void ddClient.host.openExternal(event.currentTarget.href);
+                                }}
+                              >
+                                {t('Click Here')}
+                              </a>{' '}{t('to create a token.')}
+                            </p>
+                            <h6 className="text-body">{t('Permissions for personal Action Runners')}</h6>
+                            <p className="mb-1">{t('For private repositories, enable the')} <code>repo</code> {t('scope.')}</p>
+                            <p>{t('For public repositories only,')} <code>public_repo</code> {t('is sufficient.')}</p>
+                            <h6 className="text-body">{t('Permissions for Organisation Action Runners')}</h6>
+                            <p className="mb-1">{t('Enable')} <code>admin:org</code> {t('to create, edit and delete organisation self-hosted runners and manage runner groups.')}</p>
+                            <p className="mb-1">{t('Also enable')} <code>repo</code> {t('when the organisation uses private repositories.')}</p>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     <div className={`tab-pane fade ${settingsTab === 'info' ? 'show active' : ''}`} role="tabpanel">
@@ -2275,6 +2398,16 @@ export function App() {
 
       {loading ? (
         <div>{t('Loading runners …')}</div>
+      ) : githubTokensLoaded && githubTokens.length === 0 ? (
+        <div className="card">
+          <div className="card-body">
+            <h5 className="card-title">{t('Add a GitHub token')}</h5>
+            <p className="card-text text-muted">{t('Add a GitHub Personal Access Token to connect to GitHub and manage your self-hosted runners.')}</p>
+            <button type="button" className="btn btn-primary" onClick={openGithubTokenSettings}>
+              {t('Add GitHub token')}
+            </button>
+          </div>
+        </div>
       ) : runners.length === 0 ? (
         <div className="card">
           <div className="card-body">
@@ -2685,13 +2818,23 @@ export function App() {
                     <label className="form-label">{t('Runner name')}</label>
                     <input
                       type="text"
-                      className="form-control"
+                      className={`form-control ${runnerNameTouched && !runnerNameValid ? 'is-invalid' : runnerNameTouched ? 'is-valid' : ''}`}
                       value={formState.runnerName}
                       disabled={!formEnabled}
-                      onChange={(event) => setFormState({ ...formState, runnerName: event.target.value })}
+                      onChange={(event) => {
+                        setRunnerNameTouched(true);
+                        setFormState({ ...formState, runnerName: event.target.value.replace(/[^A-Za-z0-9_-]/g, '') });
+                      }}
+                      onBlur={() => setRunnerNameTouched(true)}
+                      pattern="[A-Za-z0-9_-]+"
                       placeholder={t('Runner name')}
                     />
-                    <div className="form-text">{t('A local identifier for this runner. It becomes the runner directory name inside the host container.')}</div>
+                    {runnerNameTouched && !runnerNameValid ? (
+                      <div className="invalid-feedback">{runnerNameValidationMessage ? t(runnerNameValidationMessage) : null}</div>
+                    ) : runnerNameTouched ? (
+                      <div className="valid-feedback d-block">{t('Runner name is available.')}</div>
+                    ) : null}
+                    <div className="form-text">{t('Use a unique name containing only letters, numbers, hyphens, and underscores.')}</div>
                   </div>
                   )}
 
@@ -2726,10 +2869,14 @@ export function App() {
                       value={formState.labels}
                       onChange={(event) => {
                         const selected = Array.from(event.target.selectedOptions).map((option) => option.value);
+                        const newCustomLabels = selected.filter((label) => !labelOptions.includes(label));
+                        if (newCustomLabels.length > 0) {
+                          setCustomLabels((current) => Array.from(new Set([...current, ...newCustomLabels])));
+                        }
                         setFormState({ ...formState, labels: selected });
                       }}
                     >
-                      {labelOptions.map((label) => (
+                      {availableLabelOptions.map((label) => (
                         <option key={label} value={label}>
                           {label}
                         </option>
@@ -2743,7 +2890,7 @@ export function App() {
                   <button type="button" className="btn btn-secondary" onClick={closeDialog} disabled={saving} data-bs-toggle="tooltip" title={t('Cancel')}>
                     {t('Cancel')}
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={() => { void saveRunner(); }} disabled={saving} data-bs-toggle="tooltip" title={t('Save runner')}>
+                  <button type="button" className="btn btn-primary" onClick={() => { void saveRunner(); }} disabled={saving || !runnerNameValid} data-bs-toggle="tooltip" title={t('Save runner')}>
                     {saving ? t('Saving…') : t('Save runner')}
                   </button>
                 </div>

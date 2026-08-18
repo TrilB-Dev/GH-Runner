@@ -20,8 +20,8 @@ COPY --from=backend-builder /backend/dist /backend
 COPY --from=backend-builder /backend/node_modules /backend/node_modules
 COPY --from=ui-builder /ui/dist /ui
 COPY Language /Language
-LABEL org.opencontainers.image.title="GH Runner" \
-    org.opencontainers.image.description="GH Runner is a Docker extension for managing Multiple Self-Hosted Github Repository Runners" \
+LABEL org.opencontainers.image.title="GH Runner Manager" \
+    org.opencontainers.image.description="GH Runner Manager is a Docker extension for managing Multiple Self-Hosted Github Repository Runners" \
     org.opencontainers.image.vendor="TrilB.Dev" \
     com.docker.desktop.extension.api.version="0.4.2" \
     com.docker.extension.screenshots="" \
