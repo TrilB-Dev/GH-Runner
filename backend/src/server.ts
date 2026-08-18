@@ -87,7 +87,7 @@ const DEFAULT_LANGUAGE_LIST = [
 const EXTENSION_INFO = {
   name: 'GH Runner',
   author: 'MrTrilB',
-  documentationUrl: 'https://github.com/MrTrilB/GH-Runner'
+  documentationUrl: 'https://github.com/TrilB-Dev/GH-Runner/wiki'
 };
 
 interface ErrorResponse {
@@ -693,6 +693,53 @@ app.post('/api/github-tokens', async (req: Request, res: Response) => {
     res.json({ success: true, token: responseToken });
   } catch (error) {
     await logIfEnabled('githubApi', `Failed to save GitHub token: ${error}`);
+    sendError(res, error);
+  }
+});
+
+app.put('/api/github-tokens/:id', async (req: Request, res: Response) => {
+  try {
+    const tokenValue = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!tokenValue) {
+      return res.status(400).json({ error: 'Replacement token is required.' });
+    }
+
+    const existingToken = await getGithubTokenById(req.params.id);
+    if (!existingToken) {
+      return res.status(404).json({ error: 'GitHub token not found.' });
+    }
+
+    const response = await fetch('https://api.github.com/user', {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `token ${tokenValue}`
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(400).json({ error: 'Unable to validate token with GitHub. Please check permissions and token validity.' });
+    }
+
+    const user = await response.json() as { login: string; type: string };
+    const tokenConfig: GithubTokenConfig = {
+      ...existingToken,
+      token: tokenValue,
+      login: user.login,
+      type: user.type
+    };
+
+    await saveGithubToken(tokenConfig);
+    await logIfEnabled('githubApi', `Updated GitHub token ${tokenConfig.name} for ${tokenConfig.login}`);
+    const responseToken: GithubTokenResponse = {
+      id: tokenConfig.id,
+      name: tokenConfig.name,
+      login: tokenConfig.login,
+      type: tokenConfig.type,
+      createdAt: tokenConfig.createdAt
+    };
+    res.json({ success: true, token: responseToken });
+  } catch (error) {
+    await logIfEnabled('githubApi', `Failed to update GitHub token ${req.params.id}: ${error}`);
     sendError(res, error);
   }
 });

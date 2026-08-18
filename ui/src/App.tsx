@@ -185,6 +185,7 @@ export function App() {
   } | null>(null);
   const [tokenFormName, setTokenFormName] = useState('');
   const [tokenFormValue, setTokenFormValue] = useState('');
+  const [editingGithubTokenId, setEditingGithubTokenId] = useState<string | null>(null);
   const [tokenFormError, setTokenFormError] = useState<string | null>(null);
   const [tokenActionMessage, setTokenActionMessage] = useState<string | null>(null);
   const [showTokenForm, setShowTokenForm] = useState(false);
@@ -1109,6 +1110,57 @@ export function App() {
     }
   };
 
+  const editGithubTokenById = (id: string) => {
+    const token = githubTokens.find((item) => item.id === id);
+    if (!token) {
+      return;
+    }
+
+    setEditingGithubTokenId(id);
+    setTokenFormName(token.name);
+    setTokenFormValue('');
+    setTokenFormError(null);
+    setTokenActionMessage(null);
+    setShowTokenForm(true);
+  };
+
+  const updateGithubToken = async () => {
+    if (!service) {
+      setTokenFormError(t('Unable to access the Docker VM service.'));
+      return;
+    }
+
+    setTokenFormError(null);
+    setTokenActionMessage(null);
+
+    if (!editingGithubTokenId || !tokenFormValue.trim()) {
+      setTokenFormError(t('A replacement token is required.'));
+      return;
+    }
+
+    try {
+      await service.put(`/api/github-tokens/${encodeURIComponent(editingGithubTokenId)}`, {
+        token: tokenFormValue.trim()
+      });
+      setTokenActionMessage(t('GitHub token updated successfully.'));
+      setTokenFormValue('');
+      setEditingGithubTokenId(null);
+      setShowTokenForm(false);
+      await loadGithubTokensList();
+    } catch (err) {
+      setTokenFormError(formatError(err));
+    }
+  };
+
+  const cancelGithubTokenForm = () => {
+    setEditingGithubTokenId(null);
+    setShowTokenForm(false);
+    setTokenFormName('');
+    setTokenFormValue('');
+    setTokenFormError(null);
+    setTokenActionMessage(null);
+  };
+
   const deleteGithubTokenById = async (id: string) => {
     if (!service) {
       setError(t('Unable to access the Docker VM service.'));
@@ -1275,6 +1327,13 @@ export function App() {
   }, [showDialog]);
 
   const openDialog = (runner?: Runner) => {
+    if (!runner && githubTokens.length === 0) {
+      setSettingsTab('auth');
+      setSettingsOpen(true);
+      void loadGithubTokensList();
+      return;
+    }
+
     if (runner) {
       setEditing(runner);
       setFormState({
@@ -2040,11 +2099,16 @@ export function App() {
                                 <div className="d-flex justify-content-between align-items-center gap-3">
                                   <div>
                                     <h6 className="mb-1">{token.name}</h6>
-                                    <p className="mb-0 text-muted">{token.login} · {token.type} · {t('saved')} {new Date(token.createdAt).toLocaleDateString()}</p>
+                                    <p className="mb-0 text-muted">{token.type} · {token.login} · {t('saved')} {new Date(token.createdAt).toLocaleDateString()}</p>
                                   </div>
-                                  <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deleteGithubTokenById(token.id)}>
-                                    {t('Delete')}
-                                  </button>
+                                  <div className="btn-group" role="group" aria-label="Token actions">
+                                    <button type="button" className="btn btn-outline-warning btn-sm" onClick={() => editGithubTokenById(token.id)}>
+                                      {t('Edit')}
+                                    </button>
+                                    <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => deleteGithubTokenById(token.id)}>
+                                      {t('Delete')}
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -2060,13 +2124,14 @@ export function App() {
                         </div>
                       ) : (
                         <div>
-                          <h6>{t('Add a new GitHub PAT')}</h6>
+                          <h6>{editingGithubTokenId ? t('Edit GitHub PAT') : t('Add a new GitHub PAT')}</h6>
                           <div className="mb-3">
                             <label className="form-label">{t('Token name')}</label>
                             <input
                               type="text"
                               className="form-control"
                               value={tokenFormName}
+                              disabled={Boolean(editingGithubTokenId)}
                               onChange={(event) => {
                                 setTokenFormName(event.target.value);
                                 setTokenFormError(null);
@@ -2074,7 +2139,11 @@ export function App() {
                               }}
                               placeholder={t('Friendly name for this token')}
                             />
-                            <div className="form-text">{t('A friendly name to identify this token in the runner creation form.')}</div>
+                            <div className="form-text">
+                              {editingGithubTokenId
+                                ? t('The token name stays the same so existing runners continue using this token.')
+                                : t('A friendly name to identify this token in the runner creation form.')}
+                            </div>
                           </div>
                           <div className="mb-3">
                             <label className="form-label">{t('Personal access token')}</label>
@@ -2087,23 +2156,17 @@ export function App() {
                                 setTokenFormError(null);
                                 setTokenActionMessage(null);
                               }}
-                              placeholder={t('GitHub PAT')}
+                              placeholder={editingGithubTokenId ? t('Enter replacement GitHub PAT') : t('GitHub PAT')}
                             />
                             <div className="form-text">{t('GitHub personal access token used to enumerate repositories and validate access.')}</div>
                           </div>
                           {tokenFormError ? <div className="alert alert-danger">{tokenFormError}</div> : null}
                           {tokenActionMessage ? <div className="alert alert-success">{tokenActionMessage}</div> : null}
                           <div className="d-flex gap-2">
-                            <button type="button" className="btn btn-primary" onClick={createGithubToken} data-bs-toggle="tooltip" title={t('Save token')}>
-                              {t('Save token')}
+                            <button type="button" className="btn btn-primary" onClick={editingGithubTokenId ? updateGithubToken : createGithubToken} data-bs-toggle="tooltip" title={editingGithubTokenId ? t('Update token') : t('Save token')}>
+                              {editingGithubTokenId ? t('Update token') : t('Save token')}
                             </button>
-                            <button type="button" className="btn btn-secondary" onClick={() => {
-                              setShowTokenForm(false);
-                              setTokenFormName('');
-                              setTokenFormValue('');
-                              setTokenFormError(null);
-                              setTokenActionMessage(null);
-                            }}>
+                            <button type="button" className="btn btn-secondary" onClick={cancelGithubTokenForm}>
                               {t('Cancel')}
                             </button>
                           </div>
@@ -2130,7 +2193,15 @@ export function App() {
                             <p className="mb-1"><strong>{t('Author:')}</strong> {extensionInfo?.extensionAuthor || 'MrTrilB'}</p>
                             <p className="mb-0"><strong>{t('Documentation:')}</strong>{' '}
                               {extensionInfo?.documentationUrl ? (
-                                <a href={extensionInfo.documentationUrl} target="_blank" rel="noreferrer">{t('View docs')}</a>
+                                <a
+                                  href={extensionInfo.documentationUrl}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    void ddClient.host.openExternal(event.currentTarget.href);
+                                  }}
+                                >
+                                  {t('View docs')}
+                                </a>
                               ) : t('Not available')}
                             </p>
                           </div>
