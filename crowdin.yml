@@ -5,5 +5,5 @@ base_url: "https://api.crowdin.com"
 preserve_hierarchy: true
 files:
   - source: "/Language/GHRunner-en_GB.pot"
-    translation: "/Language/GHRunner-%locale_with_underscore%.po"
+    translation: "/Language/GHRunner-%locale_with_underscore%.pot"
     update_option: "update_as_unapproved"
