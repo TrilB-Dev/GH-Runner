@@ -87,6 +87,20 @@ Build the complete extension image from the repository root:
 docker build --tag=mrtrilb/gh-runner-manager:latest .
 ```
 
+To tag the local image with the version from `metadata.json` and push it to Docker Hub, run:
+
+```powershell
+.\scripts\push-docker.ps1
+```
+
+The script asks whether `latest` should also be updated and pushed. Use `-Build` when the source image has not been built yet:
+
+```powershell
+.\scripts\push-docker.ps1 -Build
+```
+
+By default, the script pushes only the selected version tag and optional `latest` tag. This prevents unrelated local tags from being published accidentally. Authenticate with Docker Hub using `docker login` before running it.
+
 ## Release Checks
 
 Before publishing a release:
