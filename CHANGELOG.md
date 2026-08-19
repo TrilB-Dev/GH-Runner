@@ -13,4 +13,5 @@
 
 ### Notes
 
-- Crowdin authentication and project integration are configured. The current Crowdin project is string-based, so complete file-based catalog synchronization remains unavailable through the existing CLI configuration.
+- Recreated the Crowdin project as a file-based project and validated source catalog synchronization with the pinned Crowdin CLI.
+- Translation targets are configured for German, English (US), Spanish, French, Italian, and Dutch; translations remain at 0% until localization work is completed.

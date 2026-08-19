@@ -4,6 +4,18 @@
 
 [![Crowdin](https://badges.crowdin.net/gh-runner-manager/localized.svg)](https://crowdin.com/project/gh-runner-manager)
 
+## Localization
+
+Crowdin synchronization uses the file-based project configured in `crowdin.yml`. Set `CROWDIN_PROJECT_ID` and `CROWDIN_PERSONAL_TOKEN` in a local `.env` file, then run the pinned CLI commands from the repository root:
+
+```powershell
+npx --yes @crowdin/cli@4.15.0 upload sources --no-progress
+npx --yes @crowdin/cli@4.15.0 status --no-progress
+npx --yes @crowdin/cli@4.15.0 download translations --no-progress
+```
+
+The English source catalog is `Language/GHRunner-en_GB.pot`; translated catalogs are downloaded into `Language` when translations are available.
+
 GH Runner Manager is a Docker Desktop extension for creating and managing GitHub self-hosted Actions runners inside a persistent Docker host container.
 
 ## Features
