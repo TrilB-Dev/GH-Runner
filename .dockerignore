@@ -1,3 +1,5 @@
 ui/node_modules
+.env
+crowdin.yml
 Assets/Logo/OG/
 Assets/Logo/Extras/

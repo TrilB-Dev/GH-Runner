@@ -1,5 +1,8 @@
 {
   "languages": [
-    { "code": "en_GB", "name": "English (UK)" }
+    { "code": "en_GB", "name": "English (UK)" },
+    { "code": "de_DE", "name": "Deutsch" },
+    { "code": "fr_FR", "name": "Francais" },
+    { "code": "es_ES", "name": "Espanol" }
   ]
 }

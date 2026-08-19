@@ -28,7 +28,7 @@ const DEFAULT_LANGUAGE_LIST = [
     { code: 'en_GB', name: 'English (UK)' }
 ];
 const EXTENSION_INFO = {
-    name: 'GH Runner',
+    name: 'GH Runner Manager',
     author: 'MrTrilB',
     documentationUrl: 'https://github.com/TrilB-Dev/GH-Runner/wiki'
 };
@@ -117,7 +117,12 @@ function parsePoContent(content) {
 async function loadTranslations(language) {
     const languageDir = getLanguageDir();
     const potFile = (0, path_1.join)(languageDir, `GHRunner-${language}.pot`);
+    const poFile = (0, path_1.join)(languageDir, `GHRunner-${language}.po`);
     const moFile = (0, path_1.join)(languageDir, `GHRunner-${language}.mo`);
+    if ((0, fs_1.existsSync)(poFile)) {
+        const content = await fs_1.promises.readFile(poFile, 'utf8');
+        return parsePoContent(content);
+    }
     if ((0, fs_1.existsSync)(moFile)) {
         const buffer = await fs_1.promises.readFile(moFile);
         const parsed = parseMo(buffer);
