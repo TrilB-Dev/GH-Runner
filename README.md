@@ -2,6 +2,8 @@
   <img src="https://raw.githubusercontent.com/TrilB-Dev/GH-Runner/Master/Assets/Logo/GH-Runner-Logo.svg" alt="GH Runner Manager logo" width="400">
 </p>
 
+[![Crowdin](https://badges.crowdin.net/gh-runner-manager/localized.svg)](https://crowdin.com/project/gh-runner-manager)
+
 GH Runner Manager is a Docker Desktop extension for creating and managing GitHub self-hosted Actions runners inside a persistent Docker host container.
 
 ## Features
