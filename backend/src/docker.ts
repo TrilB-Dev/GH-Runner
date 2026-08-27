@@ -147,7 +147,7 @@ async function isHostBootstrapReady(containerName: string): Promise<boolean> {
 async function bootstrapHostContainer(containerName: string) {
   const setupScript = [
     'apt-get update',
-    'apt-get install -y curl jq build-essential libssl-dev libffi-dev python3 python3-venv python3-pip python3-dev git unzip tar ca-certificates procps gnupg lsb-release apt-transport-https',
+    'apt-get install -y curl jq build-essential libssl-dev libffi-dev python3 python3-venv python3-pip python3-dev git unzip tar ca-certificates procps gnupg lsb-release apt-transport-https sudo',
     'curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/php.gpg',
     'echo "deb https://packages.sury.org/php/ bookworm main" > /etc/apt/sources.list.d/php.list',
     'apt-get update',
@@ -290,7 +290,7 @@ async function getHostRunnerToolchainVersion(hostContainer: string): Promise<str
 }
 
 async function ensureHostRunnerBase(hostContainer: string) {
-  await dockerExec(hostContainer, ['sh', '-c', 'apt-get update && apt-get install -y curl jq build-essential libssl-dev libffi-dev python3 python3-venv python3-pip python3-dev git unzip tar ca-certificates procps gnupg lsb-release apt-transport-https']);
+  await dockerExec(hostContainer, ['sh', '-c', 'apt-get update && apt-get install -y curl jq build-essential libssl-dev libffi-dev python3 python3-venv python3-pip python3-dev git unzip tar ca-certificates procps gnupg lsb-release apt-transport-https sudo']);
   await dockerExec(hostContainer, ['sh', '-c', 'curl -fsSL https://packages.sury.org/php/apt.gpg | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/php.gpg && echo "deb https://packages.sury.org/php/ bookworm main" > /etc/apt/sources.list.d/php.list && apt-get update']);
   await dockerExec(hostContainer, ['sh', '-c', 'apt-get install -y php8.3-cli php8.3-mbstring php8.3-xml php8.3-curl php8.3-zip php8.4-cli php8.4-mbstring php8.4-xml php8.4-curl php8.4-zip php8.5-cli php8.5-mbstring php8.5-xml php8.5-curl php8.5-zip']);
   await dockerExec(hostContainer, ['sh', '-c', 'curl -fsSL https://deb.nodesource.com/setup_24.x | bash -']);
