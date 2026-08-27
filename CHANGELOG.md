@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.2 - 2026-08-27
+
+### Added
+
+- Added PHP 8.3, 8.4, and 8.5 runtimes to runner host containers.
+- Added Node.js 24 to runner host containers.
+- Added PHP_CodeSniffer and WordPress Coding Standards through Composer.
+
+### Fixed
+
+- Existing runner host containers now detect and apply the updated development toolchain.
+
 ## 1.0.1 - 2026-08-19
 
 ### Added
