@@ -2,7 +2,8 @@
   <img src="https://raw.githubusercontent.com/TrilB-Dev/GH-Runner/Master/Assets/Logo/GH-Runner-Logo.svg" alt="GH Runner Manager logo" width="400">
 </p>
 
-[![Crowdin](https://badges.crowdin.net/gh-runner-manager/localized.svg)](https://crowdin.com/project/gh-runner-manager)
+[![Crowdin](https://badges.crowdin.net/gh-runner-manager/localized.svg)](https://crowdin.com/project/gh-runner-manager) ![Docker Image Version](https://img.shields.io/docker/v/mrtrilb/gh-runner-manager?sort=semver&logo=docker&logoColor=%23ffffff)
+
 
 ## Localization
 
