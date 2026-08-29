@@ -1,5 +1,5 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "icon": "GH-Runner-Logo-Icon.svg",
   "vm": {
     "composefile": "docker-compose.yaml",

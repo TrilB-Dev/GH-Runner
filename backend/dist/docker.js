@@ -162,6 +162,8 @@ async function bootstrapHostContainer(containerName) {
         'php8.5 -r "unlink(\'composer-setup.php\');"',
         `groupadd -f ${HOST_RUNNER_USER}`,
         `id -u ${HOST_RUNNER_USER} >/dev/null 2>&1 || useradd -m -s /bin/sh -g ${HOST_RUNNER_USER} ${HOST_RUNNER_USER}`,
+        `printf '%s\\n' '${HOST_RUNNER_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/${HOST_RUNNER_USER}`,
+        `chmod 0440 /etc/sudoers.d/${HOST_RUNNER_USER}`,
         'mkdir -p /opt/github/composer',
         `chown -R ${HOST_RUNNER_USER}:${HOST_RUNNER_USER} /opt/github/composer`,
         `su ${HOST_RUNNER_USER} -s /bin/sh -c 'export COMPOSER_HOME=/opt/github/composer && php8.5 /usr/local/bin/composer global config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true && php8.5 /usr/local/bin/composer global require "squizlabs/php_codesniffer=*" "wp-coding-standards/wpcs=*" && /opt/github/composer/vendor/bin/phpcs --config-set installed_paths /opt/github/composer/vendor/wp-coding-standards/wpcs'`,
@@ -290,6 +292,7 @@ async function ensureHostRunnerBase(hostContainer) {
     await dockerExec(hostContainer, ['sh', '-c', 'php8.5 composer-setup.php --install-dir=/usr/local/bin --filename=composer']);
     await dockerExec(hostContainer, ['sh', '-c', 'php8.5 -r "unlink(\'composer-setup.php\');"']);
     await dockerExec(hostContainer, ['sh', '-c', `groupadd -f ${HOST_RUNNER_USER} && id -u ${HOST_RUNNER_USER} >/dev/null 2>&1 || useradd -m -s /bin/sh -g ${HOST_RUNNER_USER} ${HOST_RUNNER_USER}`]);
+    await dockerExec(hostContainer, ['sh', '-c', `printf '%s\\n' '${HOST_RUNNER_USER} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/${HOST_RUNNER_USER} && chmod 0440 /etc/sudoers.d/${HOST_RUNNER_USER}`]);
     await dockerExec(hostContainer, ['sh', '-c', `mkdir -p /opt/github/composer && chown -R ${HOST_RUNNER_USER}:${HOST_RUNNER_USER} /opt/github/composer && su ${HOST_RUNNER_USER} -s /bin/sh -c 'export COMPOSER_HOME=/opt/github/composer && php8.5 /usr/local/bin/composer global config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true && php8.5 /usr/local/bin/composer global require "squizlabs/php_codesniffer=*" "wp-coding-standards/wpcs=*" && /opt/github/composer/vendor/bin/phpcs --config-set installed_paths /opt/github/composer/vendor/wp-coding-standards/wpcs' && ln -sf /opt/github/composer/vendor/bin/phpcs /usr/local/bin/phpcs && ln -sf /opt/github/composer/vendor/bin/phpcbf /usr/local/bin/phpcbf`]);
     await dockerExec(hostContainer, ['sh', '-c', 'rm -rf /opt/github/base && mkdir -p /opt/github/base && mkdir -p /opt/github/runners']);
     await dockerExec(hostContainer, ['sh', '-c', `cd /opt/github/base && curl -L -o actions-runner-linux-x64-${ACTIONS_RUNNER_VERSION}.tar.gz ${ACTIONS_RUNNER_URL} && tar xzf actions-runner-linux-x64-${ACTIONS_RUNNER_VERSION}.tar.gz && rm -f actions-runner-linux-x64-${ACTIONS_RUNNER_VERSION}.tar.gz && chmod +x config.sh run.sh bin/installdependencies.sh && ./bin/installdependencies.sh && printf '%s' '${ACTIONS_RUNNER_VERSION}' > ${RUNNER_BASE_VERSION_FILE} && printf '%s' '${RUNNER_TOOLCHAIN_VERSION}' > ${RUNNER_TOOLCHAIN_VERSION_FILE}`]);

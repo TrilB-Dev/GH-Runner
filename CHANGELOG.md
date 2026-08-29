@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3 - 2026-08-29
+
+### Fixed
+
+- Added passwordless sudo configuration for the `githubrunner` user so GitHub Actions tools such as `shivammathur/setup-php` can install and configure dependencies.
+
 ## 1.0.2 - 2026-08-27
 
 ### Added
