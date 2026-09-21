@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4 - 2026-09-21
+
+### Fixed
+
+- Fixed Docker Extension metadata validation by providing all required image labels.
+- Added a separate extension version manifest and multi-architecture image publishing support.
+
 ## 1.0.3 - 2026-08-29
 
 ### Fixed

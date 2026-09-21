@@ -24,15 +24,16 @@ LABEL org.opencontainers.image.title="GH Runner Manager" \
     org.opencontainers.image.description="GH Runner Manager is a Docker extension for managing Multiple Self-Hosted Github Repository Runners" \
     org.opencontainers.image.vendor="TrilB.Dev" \
     com.docker.desktop.extension.api.version="0.4.2" \
-    com.docker.extension.screenshots="" \
+    com.docker.extension.screenshots="[]" \
     com.docker.desktop.extension.icon="https://trilb.dev/wp-content/uploads/2026/07/GH-Runner-Logo-Icon.svg" \
-    com.docker.extension.detailed-description="" \
-    com.docker.extension.publisher-url="https://trilb.dev/collection/software-extension/docker/gh-runner-manager/" \
-    com.docker.extension.additional-urls="" \
-    com.docker.extension.categories="Utility Tools" \
-    com.docker.extension.changelog=""
+    com.docker.extension.detailed-description="Manage multiple GitHub Actions self-hosted runners from Docker Desktop. Configure repositories, organizations, runner labels, startup behavior, and runner logs from one extension." \
+    com.docker.extension.publisher-url="https://github.com/TrilB-Dev/GH-Runner" \
+    com.docker.extension.additional-urls="[]" \
+    com.docker.extension.categories="utility-tools" \
+    com.docker.extension.changelog="1.0.4: Fixed Docker Extension metadata validation and added multi-architecture publishing support."
 COPY docker-compose.yaml /docker-compose.yaml
 COPY metadata.json /metadata.json
+COPY extension-version.json /extension-version.json
 COPY GH-Runner-Logo-Icon.svg /GH-Runner-Logo-Icon.svg
 ##COPY GH-Runner-Logo.svg /GH-Runner-Logo.svg
 COPY Assets /Assets

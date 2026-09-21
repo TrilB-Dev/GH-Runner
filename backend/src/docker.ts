@@ -36,7 +36,7 @@ function quoteNestedShellArgument(value: string): string {
 
 export function getExtensionVersion(): string {
   try {
-    const metadataPath = join(__dirname, '..', '..', 'metadata.json');
+    const metadataPath = join(__dirname, '..', '..', 'extension-version.json');
     const raw = readFileSync(metadataPath, 'utf8');
     const metadata = JSON.parse(raw) as { version?: string };
     return metadata.version?.trim() || '0.0.1';

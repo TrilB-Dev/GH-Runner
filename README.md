@@ -38,7 +38,7 @@ GH Runner Manager is a Docker Desktop extension for creating and managing GitHub
 
 ## Build and Install
 
-The release version is defined in [metadata.json](metadata.json). Build the extension image with:
+The release version is defined in [extension-version.json](extension-version.json). Build the extension image with:
 
 ```powershell
 docker build --tag=mrtrilb/gh-runner-manager:latest .
